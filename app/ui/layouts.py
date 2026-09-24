@@ -94,6 +94,15 @@ class LayoutProfile:
     touch_targets: bool
     """True면 버튼 히트 영역을 시각 크기보다 넓게 잡는다."""
 
+    # --- 기본값이 있는 필드는 여기부터 (dataclass 규칙) ---
+
+    art_vertical_bias: float = 0.5
+    """앨범 아트의 세로 위치. 0.0=위쪽 끝, 0.5=가운데, 1.0=아래쪽 끝.
+
+    아트는 정사각형이라 세로로 긴 영역에서는 남는 공간이 생긴다.
+    가운데에 두면 오른쪽 곡 정보보다 아래로 처져 보인다.
+    """
+
     @property
     def aspect(self) -> float:
         return self.window_width / self.window_height
@@ -165,6 +174,8 @@ DESKTOP_NARROW = LayoutProfile(
     wave_fps=60,
     art_stretch=4,
     panel_stretch=5,
+    # 세로 배치에서도 아트가 아래로 처지지 않게 살짝 위로.
+    art_vertical_bias=0.3,
     show_album_line=True,
     show_key_hints=True,
     touch_targets=False,
@@ -223,6 +234,11 @@ COMPACT_480 = LayoutProfile(
     # 2:3이면 263px라 27px 여유가 남는다.
     art_stretch=2,
     panel_stretch=3,
+    # 아트는 175x175인데 영역 세로는 약 238px이라 63px이 남는다.
+    # 가운데(0.5)에 두면 위아래 31px씩 떠서 오른쪽 곡 제목보다
+    # 아트가 아래로 처져 보인다. 0.15면 위쪽 여백이 약 9px로 줄어
+    # 곡 정보와 눈높이가 맞는다.
+    art_vertical_bias=0.15,
     show_album_line=False,
     show_key_hints=False,
     touch_targets=True,

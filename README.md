@@ -835,6 +835,19 @@ python main.py --compact
 **전 기능 유지.** 폰트·버튼·웨이브 높이를 줄이고, 앨범명 줄과
 단축키 안내만 뺐다(세로 부족 / 키보드 없음).
 
+### 실제 기기용 실행 옵션
+
+```powershell
+# 키오스크 모드 - 창 테두리도 커서도 없다 (실물 덱처럼)
+python main.py --compact --fullscreen
+
+# 콘솔이 없는 기기용 - 파일로 로그를 남긴다 (1MB씩 3개 순환)
+python main.py --log-file logs/deck.log
+```
+
+RK3399처럼 화면만 있고 콘솔이 없는 기기에서는 문제가 생겨도 로그를 볼 방법이
+없다. `--log-file`로 남겨 두면 나중에 SD카드를 꺼내거나 SSH로 확인할 수 있다.
+
 자세한 포팅 가이드는 [`esp32/README.md`](esp32/README.md) 참고.
 
 ---
@@ -869,9 +882,11 @@ Rate Limit 보호를 위한 의도적 설계이며, 연속 조절은 슬라이�
 ### 실행 옵션
 
 ```powershell
-python main.py             # 일반 실행 (PC UI)
-python main.py --compact   # 480x320 ESP32 레이아웃 미리보기
-python main.py --debug     # 상세 로그
+python main.py                      # 일반 실행 (PC UI)
+python main.py --compact            # 480x320 ESP32 레이아웃 미리보기
+python main.py --fullscreen         # 전체화면 + 커서 숨김 (키오스크)
+python main.py --log-file logs/deck.log   # 파일에도 로그 기록
+python main.py --debug              # 상세 로그
 python main.py --logout    # 로그인 정보 삭제 후 종료
 python -m app.doctor       # 환경 점검
 ```

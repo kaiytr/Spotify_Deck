@@ -91,9 +91,22 @@ class AlbumArtWidget(QWidget):
 
     accent_changed = Signal(object)
 
-    def __init__(self, *, radius: int = 12, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        radius: int = 12,
+        vertical_bias: float = 0.5,
+        parent: QWidget | None = None,
+    ) -> None:
+        """
+        Args:
+            vertical_bias: 세로 위치. 0.0=위쪽 끝, 0.5=가운데, 1.0=아래쪽 끝.
+                앨범 아트는 정사각형이라 세로로 긴 영역에서는 남는 공간이 생긴다.
+                좁은 화면에서는 위로 붙여야 오른쪽 곡 정보와 눈높이가 맞는다.
+        """
         super().__init__(parent)
         self._radius = radius
+        self._vertical_bias = max(0.0, min(1.0, vertical_bias))
         self._pixmap: QPixmap | None = None
         self._previous: QPixmap | None = None
         self._current_url: str | None = None
@@ -155,6 +168,13 @@ class AlbumArtWidget(QWidget):
         loader.signals.failed.connect(lambda *_: self._inflight.discard(loader))
         self._pool.start(loader)
 
+    def set_vertical_bias(self, bias: float) -> None:
+        """세로 위치를 바꾼다 (레이아웃 프로파일 전환 시)."""
+        bias = max(0.0, min(1.0, bias))
+        if bias != self._vertical_bias:
+            self._vertical_bias = bias
+            self.update()
+
     def clear(self) -> None:
         self._current_url = None
         self._begin_transition(None)
@@ -213,10 +233,19 @@ class AlbumArtWidget(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
 
-        # 위젯 영역 안에서 정사각형을 중앙 정렬한다 (앨범 아트는 1:1).
+        # 앨범 아트는 1:1이므로 위젯 영역 안에 정사각형을 배치한다.
+        # 가로는 항상 가운데, 세로는 vertical_bias로 조절한다.
+        #
+        # 세로로 긴 영역(좁은 화면)에서는 가운데 정렬하면 아트가 아래로
+        # 처져 보여 오른쪽 곡 정보와 눈높이가 어긋난다.
         side = min(self.width(), self.height())
-        box = QRectF(0, 0, side, side)
-        box.moveCenter(QRectF(self.rect()).center())
+        slack = max(0.0, self.height() - side)
+        box = QRectF(
+            (self.width() - side) / 2,
+            slack * self._vertical_bias,
+            side,
+            side,
+        )
 
         path = QPainterPath()
         path.addRoundedRect(box, self._radius, self._radius)

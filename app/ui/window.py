@@ -142,7 +142,10 @@ class DeckWindow(QMainWindow):
         self._body = QHBoxLayout()
         self._body.setSpacing(profile.column_gap)
 
-        self._album_art = AlbumArtWidget(radius=14 if profile is DESKTOP else 10)
+        self._album_art = AlbumArtWidget(
+            radius=14 if profile is DESKTOP else 10,
+            vertical_bias=profile.art_vertical_bias,
+        )
         self._body.addWidget(self._album_art, profile.art_stretch)
 
         self._panel = self._build_panel()
@@ -613,6 +616,7 @@ class DeckWindow(QMainWindow):
         self._body.setSpacing(profile.column_gap)
         self._body.setStretch(0, profile.art_stretch)
         self._body.setStretch(1, profile.panel_stretch)
+        self._album_art.set_vertical_bias(profile.art_vertical_bias)
 
         # --- 글자 ---
         title_font = self._title_label.font()

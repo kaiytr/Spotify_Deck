@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from pathlib import Path
 
 from app.core.console import enable_utf8_console
 
@@ -31,14 +32,40 @@ enable_utf8_console()
 logger = logging.getLogger("spotify_deck")
 
 
-def setup_logging(level: str) -> None:
+def setup_logging(level: str, log_file: str | None = None) -> None:
+    """콘솔과 (선택적으로) 파일에 로그를 남긴다.
+
+    파일 로깅이 필요한 이유:
+        RK3399나 ESP32처럼 화면만 있고 콘솔이 없는 기기에서는
+        문제가 생겨도 로그를 볼 방법이 없다. 파일로 남겨 두면
+        나중에 SD카드를 꺼내거나 SSH로 들어가 확인할 수 있다.
+    """
+    handlers: list[logging.Handler] = [logging.StreamHandler()]
+
+    if log_file:
+        from logging.handlers import RotatingFileHandler
+
+        path = Path(log_file)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # 1MB씩 3개까지. 무한히 커져서 저장 공간을 채우면
+        # 임베디드 기기에서는 다른 기능까지 망가진다.
+        handlers.append(
+            RotatingFileHandler(
+                path, maxBytes=1_000_000, backupCount=3, encoding="utf-8"
+            )
+        )
+
     logging.basicConfig(
         level=getattr(logging, level, logging.INFO),
         format="%(asctime)s  %(levelname)-7s  %(name)s: %(message)s",
         datefmt="%H:%M:%S",
+        handlers=handlers,
     )
     # 폴링이 1초마다 돌아 urllib3 디버그 로그가 화면을 도배한다.
     logging.getLogger("urllib3").setLevel(logging.WARNING)
+
+    if log_file:
+        logger.info("로그 파일: %s", Path(log_file).resolve())
 
 
 def show_startup_error(title: str, message: str, hint: str = "") -> None:
@@ -79,6 +106,16 @@ def main() -> int:
         action="store_true",
         help="480x320 ESP32 화면 레이아웃으로 실행한다 (하드웨어 없이 설계 확인용)",
     )
+    parser.add_argument(
+        "--fullscreen",
+        action="store_true",
+        help="전체화면 + 마우스 커서 숨김 (키오스크 모드, 실제 기기용)",
+    )
+    parser.add_argument(
+        "--log-file",
+        metavar="경로",
+        help="로그를 파일에도 남긴다 (콘솔이 없는 기기용). 예: logs/deck.log",
+    )
     args = parser.parse_args()
 
     # --- 설정 로딩 (GUI보다 먼저: .env 오류를 빨리 알려 준다) ---
@@ -92,7 +129,7 @@ def main() -> int:
         show_startup_error("설정을 확인해 주세요", exc.user_message, exc.hint or "")
         return 1
 
-    setup_logging("DEBUG" if args.debug else settings.log_level)
+    setup_logging("DEBUG" if args.debug else settings.log_level, args.log_file)
     logger.info("Spotify Deck 시작 (Client ID: %s)", settings.masked_client_id())
 
     # --- 인증 ---
@@ -191,7 +228,19 @@ def main() -> int:
 
     qt_app.aboutToQuit.connect(cleanup)
 
-    window.show()
+    # --- 키오스크 모드 (실제 기기용) ---
+    #
+    # 실물 덱에는 창 테두리도 작업표시줄도 없고, 마우스도 없다.
+    # 커서가 화면에 남아 있으면 제품처럼 보이지 않는다.
+    if args.fullscreen:
+        from PySide6.QtCore import Qt
+        from PySide6.QtGui import QCursor
+
+        qt_app.setOverrideCursor(QCursor(Qt.CursorShape.BlankCursor))
+        window.showFullScreen()
+        logger.info("전체화면 모드 (Esc로 종료)")
+    else:
+        window.show()
     poller.start()
 
     return qt_app.exec()
