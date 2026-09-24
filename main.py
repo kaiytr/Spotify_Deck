@@ -1,7 +1,8 @@
 """Spotify Deck 진입점.
 
 실행:
-    python main.py              일반 실행
+    python main.py              일반 실행 (PC UI)
+    python main.py --compact    480x320 ESP32 레이아웃 미리보기
     python main.py --logout     저장된 로그인 정보를 지우고 다시 로그인
     python main.py --debug      상세 로그 출력
 
@@ -73,6 +74,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Spotify Deck")
     parser.add_argument("--logout", action="store_true", help="저장된 로그인 정보를 지운다")
     parser.add_argument("--debug", action="store_true", help="상세 로그를 출력한다")
+    parser.add_argument(
+        "--compact",
+        action="store_true",
+        help="480x320 ESP32 화면 레이아웃으로 실행한다 (하드웨어 없이 설계 확인용)",
+    )
     args = parser.parse_args()
 
     # --- 설정 로딩 (GUI보다 먼저: .env 오류를 빨리 알려 준다) ---
@@ -123,6 +129,7 @@ def main() -> int:
     from app.spotify.client import SpotifyClient
     from app.spotify.player import SpotifyPlayer
     from app.audio.factory import create_wave_source
+    from app.ui.layouts import COMPACT_480, DESKTOP
     from app.ui.window import DeckWindow
     from app.ui.worker import PollWorker
 
@@ -148,7 +155,19 @@ def main() -> int:
     if wave_source is not None:
         logger.info("웨이브 바: %s", wave_source.status_text)
 
-    window = DeckWindow(controller, poller, wave_source=wave_source)
+    # --compact 는 ESP32 목표 화면(480x320)을 그대로 흉내 낸다.
+    # 창 크기를 고정해 실제 기기와 같은 조건에서 레이아웃을 확인할 수 있다.
+    profile = COMPACT_480 if args.compact else DESKTOP
+    if args.compact:
+        logger.info("Compact 레이아웃 (480x320, ESP32 목표 화면)")
+
+    window = DeckWindow(
+        controller,
+        poller,
+        wave_source=wave_source,
+        layout=profile,
+        lock_layout=args.compact,
+    )
 
     # --- 입력 장치 ---
     # 여기가 하드웨어 확장 지점이다.

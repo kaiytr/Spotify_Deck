@@ -1,5 +1,9 @@
 """백그라운드 작업 스레드.
 
+이 모듈은 Spotify를 직접 알지 못한다.
+PlaybackSource 인터페이스에만 의존하므로 ESP32로 옮길 때
+UI 계층이 Spotify 클라이언트를 끌고 가지 않는다.
+
 UI 스레드에서 네트워크 요청을 하면 창이 멈춘다(응답 없음).
 그래서 두 가지를 워커로 분리한다.
 
@@ -18,8 +22,8 @@ from PySide6.QtCore import QObject, QRunnable, QThread, Signal
 from app.core.actions import ActionEvent
 from app.core.deck_controller import ActionResult, DeckController
 from app.core.errors import DeckError, NetworkError, RateLimitError
+from app.core.playback_source import PlaybackSource
 from app.spotify.models import PlaybackState
-from app.spotify.player import SpotifyPlayer
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +49,7 @@ class PollWorker(QThread):
     error = Signal(object)
     recovered = Signal()
 
-    def __init__(self, player: SpotifyPlayer, interval_ms: int = 1000) -> None:
+    def __init__(self, player: PlaybackSource, interval_ms: int = 1000) -> None:
         super().__init__()
         self._player = player
         self._base_interval = interval_ms

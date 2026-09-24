@@ -1,5 +1,4 @@
 # 🎧 Spotify Deck
-
 Windows PC에서 실행하는 **Spotify 물리 덱 프로토타입**.
 최종 목표는 `RK3399 + LCD + 물리 버튼 + 로터리 엔코더` 기반의 실제 하드웨어 제품이며,
 이 저장소는 그 UI와 Spotify 제어 로직을 PC에서 먼저 완성하기 위한 단계다.
@@ -20,6 +19,7 @@ Windows PC에서 실행하는 **Spotify 물리 덱 프로토타입**.
 8. [STEP 11 · 하드웨어 이식](#step-11--하드웨어-이식-구조)
 9. [웨이브 바](#웨이브-바-실시간-오디오-스펙트럼)
 10. [앨범 아트 동적 테마](#앨범-아트-동적-테마)
+11. [Hardware Roadmap](#hardware-roadmap)
 9. [조작법](#조작법)
 10. [프로젝트 구조](#프로젝트-구조)
 11. [문제 해결](#문제-해결)
@@ -43,7 +43,8 @@ Windows PC에서 실행하는 **Spotify 물리 덱 프로토타입**.
 | 11 | 하드웨어 이식 구조 | ✅ 완료 |
 | + | 웨이브 바 (실시간 오디오 스펙트럼) | ✅ 완료 |
 | + | 앨범 아트 동적 테마 | ✅ 완료 |
-| + | 테스트 스위트 (157개) | ✅ 완료 |
+| + | 테스트 스위트 (192개) | ✅ 완료 |
+| + | 하드웨어 이식 구조 (ESP32 준비) | ✅ 완료 |
 
 ---
 
@@ -684,7 +685,7 @@ WaveSource (app/audio/base.py)
 python -m pytest
 ```
 
-157개의 단위 테스트가 약 1초에 돈다. 네트워크나 오디오 장치, Spotify 계정이 필요 없다.
+192개의 단위 테스트가 약 1초에 돈다. 네트워크나 오디오 장치, Spotify 계정이 필요 없다.
 
 | 파일 | 검증 내용 |
 |---|---|
@@ -695,6 +696,7 @@ python -m pytest
 | `test_spectrum.py` | FFT 빈 독점 배정, 주파수→대역 대응, 포화 방지, attack>decay |
 | `test_input_and_tokens.py` | 키 매핑 계약, 입력 계층 격리, 토큰 저장소 원자성 |
 | `test_palette.py` | 앨범 색 추출, 배경 무시, 가독성 보정, 흑백 폴백 |
+| `test_portability.py` | 계약 동기화, 480×320 레이아웃 적합성, ESP32 메모리 예산 |
 
 테스트는 **실제로 겪은 버그를 고정**한다. 예를 들어 `test_uris_are_not_pre_encoded`는
 URI 이중 인코딩으로 좋아요 기능이 통째로 죽었던 문제를,
@@ -734,6 +736,109 @@ URI 이중 인코딩으로 좋아요 기능이 통째로 죽었던 문제를,
 
 ---
 
+## Hardware Roadmap
+
+```
+현재                 1차 하드웨어                  최종
+─────────────        ──────────────────────        ──────────────────
+Windows PC     ──>   4" ESP32 CYD            ──>   3D 프린트 케이스에
++ Keyboard           480×320 TFT                   담긴 Spotify Deck
+                     Touchscreen
+                     Physical Buttons
+                     Rotary Encoder
+```
+
+### 두 플랫폼의 구조
+
+```
+  PC Version                        Hardware Version
+  ─────────────────────             ─────────────────────
+  Spotify API                       Spotify API
+       │                                 │
+       ▼                                 ▼
+  Spotify Client                    Spotify Client
+  (Python / requests)               (C++ / HTTPClient)
+       │                                 │
+       ▼                                 ▼
+  ╔═══════════════╗                 ╔═══════════════╗
+  ║ Playback State║  ◀── 같은 정의 ──▶ ║ Playback State║
+  ╚═══════════════╝                 ╚═══════════════╝
+       │                                 │
+       ▼                                 ▼
+  PC UI (PySide6)                   ESP32 UI (LVGL 예정)
+       │                                 │
+       ▼                                 ▼
+  ╔═══════════════╗                 ╔═══════════════╗
+  ║  DeckAction   ║  ◀── 같은 정의 ──▶ ║  DeckAction   ║
+  ╚═══════════════╝                 ╚═══════════════╝
+       ▲                                 ▲
+       │                                 │
+  Keyboard Input                    Touch / GPIO Button
+                                    / Rotary Encoder
+```
+
+두 겹줄 박스가 **공유 계약**이다. `app/core/contract.py` 한 곳에서 정의하고
+`tools/export_contract.py`가 C++ 헤더를 생성하므로 손으로 쓴 C++ enum이 없다.
+→ 두 플랫폼이 어긋날 수 없다.
+
+### 대상 보드
+
+**Hosyond 4.0" ESP32** ([Amazon B0FGJJ24S1](https://www.amazon.com/dp/B0FGJJ24S1))
+— ESP32-D0WD-V3, 520KB SRAM, 4MB Flash, ST7796S 320×480 SPI, TN 패널
+
+> ⚠️ **GPIO 핀맵은 확인되지 않았다.** 이 SKU의 핀 배치가 공개되어 있지 않아
+> `app/hardware/board.py`에 전부 `None`으로 두고 TODO 처리했다.
+> 잘못된 핀은 하드웨어를 상하게 할 수 있으므로 **추측해서 채우지 않는다.**
+>
+> PSRAM도 리스팅에 언급이 없어 **없다고 가정**하고 설계했다.
+
+```powershell
+python -m app.hardware.board     # 확인/미확인 사양 현황
+python -m app.core.artwork       # 앨범 아트 메모리 견적
+```
+
+### 메모리가 설계를 좌우한다
+
+```
+480×320×2바이트 = 300KB   ← 풀 프레임버퍼
+SRAM 520KB - WiFi/TLS    ≈ 180KB 가용
+```
+
+전체 화면 버퍼가 안 들어가므로 **부분 갱신**이 필수다.
+Compact 레이아웃의 앨범 아트를 175px로 정한 것도 이 예산 때문이다
+(59KB RGB565 + 디코더/TLS 20KB = 79KB, 여유 100KB).
+
+### 480×320 미리보기
+
+실물 없이 PC에서 ESP32 화면을 그대로 볼 수 있다:
+
+```powershell
+python main.py --compact
+```
+
+창이 480×320으로 **고정**된다. 실제 기기는 해상도가 고정이므로
+반응형으로 바뀌면 설계 확인이 안 되기 때문이다.
+
+```
+┌──────────────────────────────────────────────┐
+│ ● 연결됨                      기기명 · 컴퓨터 │
+├───────────────┬──────────────────────────────┤
+│               │  곡 제목 (최대 2줄)           │
+│   앨범 아트    │  아티스트                     │
+│   175×175     │  ▁▃▅▂▄▁▃                     │
+│               │  ━━━━━●━━━━  0:00 / 0:00     │
+│               │    ◀   ▶   ▶▶                │
+│               │  ⤮ ⟲ ♥        🔊 ━━━━        │
+└───────────────┴──────────────────────────────┘
+```
+
+**전 기능 유지.** 폰트·버튼·웨이브 높이를 줄이고, 앨범명 줄과
+단축키 안내만 뺐다(세로 부족 / 키보드 없음).
+
+자세한 포팅 가이드는 [`esp32/README.md`](esp32/README.md) 참고.
+
+---
+
 ## 조작법
 
 ### 키보드
@@ -764,7 +869,8 @@ Rate Limit 보호를 위한 의도적 설계이며, 연속 조절은 슬라이�
 ### 실행 옵션
 
 ```powershell
-python main.py             # 일반 실행
+python main.py             # 일반 실행 (PC UI)
+python main.py --compact   # 480x320 ESP32 레이아웃 미리보기
 python main.py --debug     # 상세 로그
 python main.py --logout    # 로그인 정보 삭제 후 종료
 python -m app.doctor       # 환경 점검
@@ -782,9 +888,15 @@ Spotify_Deck/
 │   │
 │   ├── core/                     # ═══ 계층 간 공통 계약 ═══
 │   │   ├── actions.py            #   DeckAction - 입력↔제어 경계 (가장 중요)
+│   │   ├── contract.py           #   PC↔ESP32 공유 정의 (단일 출처)
+│   │   ├── playback_source.py    #   UI가 Spotify를 모르게 하는 경계
+│   │   ├── artwork.py            #   앨범 아트를 상태와 분리 + 메모리 예산
 │   │   ├── deck_controller.py    #   액션 → Spotify 호출 디스패처
 │   │   ├── errors.py             #   사용자 친화적 예외 계층
 │   │   └── console.py            #   Windows UTF-8 콘솔 보정
+│   │
+│   ├── hardware/                 # ═══ ESP32 준비 (PC 실행에 미사용) ═══
+│   │   └── board.py              #   확인된 사양 / 미확인 TODO 핀맵
 │   │
 │   ├── config/
 │   │   ├── settings.py           #   .env 로딩 + Redirect URI 검증 + 스코프
@@ -820,6 +932,16 @@ Spotify_Deck/
 │           ├── buttons.py        #     아이콘 버튼 / 재생 버튼
 │           └── slider.py         #     진행률 · 볼륨 슬라이더
 │
+├── contract/
+│   └── deck_contract.json        # 자동 생성 - 기계가 읽는 공유 정의
+├── esp32/
+│   ├── README.md                 # 포팅 가이드
+│   └── include/
+│       └── deck_contract.h       # 자동 생성 - 직접 수정 금지
+├── tools/
+│   ├── export_contract.py        # 계약 -> C++ 헤더 생성
+│   └── render_wave.py            # 웨이브 바 디자인 미리보기
+├── tests/                        # 192개
 ├── assets/
 ├── .env                          # 비밀값 (Git 제외)
 ├── .env.example

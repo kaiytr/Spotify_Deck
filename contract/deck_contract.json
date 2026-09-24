@@ -1,0 +1,198 @@
+{
+  "version": 1,
+  "actions": [
+    {
+      "name": "PLAY_PAUSE",
+      "code": 0,
+      "value": "play_pause"
+    },
+    {
+      "name": "PLAY",
+      "code": 1,
+      "value": "play"
+    },
+    {
+      "name": "PAUSE",
+      "code": 2,
+      "value": "pause"
+    },
+    {
+      "name": "NEXT_TRACK",
+      "code": 3,
+      "value": "next_track"
+    },
+    {
+      "name": "PREVIOUS_TRACK",
+      "code": 4,
+      "value": "previous_track"
+    },
+    {
+      "name": "VOLUME_UP",
+      "code": 5,
+      "value": "volume_up"
+    },
+    {
+      "name": "VOLUME_DOWN",
+      "code": 6,
+      "value": "volume_down"
+    },
+    {
+      "name": "VOLUME_SET",
+      "code": 7,
+      "value": "volume_set"
+    },
+    {
+      "name": "SEEK_SET",
+      "code": 8,
+      "value": "seek_set"
+    },
+    {
+      "name": "SEEK_FORWARD",
+      "code": 9,
+      "value": "seek_forward"
+    },
+    {
+      "name": "SEEK_BACKWARD",
+      "code": 10,
+      "value": "seek_backward"
+    },
+    {
+      "name": "TOGGLE_SHUFFLE",
+      "code": 11,
+      "value": "toggle_shuffle"
+    },
+    {
+      "name": "TOGGLE_REPEAT",
+      "code": 12,
+      "value": "toggle_repeat"
+    },
+    {
+      "name": "TOGGLE_LIKE",
+      "code": 13,
+      "value": "toggle_like"
+    },
+    {
+      "name": "REFRESH",
+      "code": 14,
+      "value": "refresh"
+    },
+    {
+      "name": "QUIT",
+      "code": 15,
+      "value": "quit"
+    }
+  ],
+  "repeat_modes": [
+    {
+      "name": "OFF",
+      "code": 0,
+      "value": "off"
+    },
+    {
+      "name": "CONTEXT",
+      "code": 1,
+      "value": "context"
+    },
+    {
+      "name": "TRACK",
+      "code": 2,
+      "value": "track"
+    }
+  ],
+  "playback_fields": [
+    {
+      "name": "connected",
+      "ctype": "bool",
+      "max_len": null,
+      "note": "Spotify API 연결 상태"
+    },
+    {
+      "name": "has_track",
+      "ctype": "bool",
+      "max_len": null,
+      "note": "재생 중인 콘텐츠가 있는지"
+    },
+    {
+      "name": "title",
+      "ctype": "char[]",
+      "max_len": 128,
+      "note": "곡 제목"
+    },
+    {
+      "name": "artist",
+      "ctype": "char[]",
+      "max_len": 128,
+      "note": "아티스트 (여러 명이면 ', '로 연결)"
+    },
+    {
+      "name": "album",
+      "ctype": "char[]",
+      "max_len": 128,
+      "note": "앨범명"
+    },
+    {
+      "name": "album_art_url",
+      "ctype": "char[]",
+      "max_len": 256,
+      "note": "앨범 아트 URL (이미지 자체가 아님)"
+    },
+    {
+      "name": "is_playing",
+      "ctype": "bool",
+      "max_len": null,
+      "note": "재생 중이면 true"
+    },
+    {
+      "name": "progress_ms",
+      "ctype": "uint32_t",
+      "max_len": null,
+      "note": "현재 재생 위치 (밀리초)"
+    },
+    {
+      "name": "duration_ms",
+      "ctype": "uint32_t",
+      "max_len": null,
+      "note": "곡 전체 길이 (밀리초)"
+    },
+    {
+      "name": "volume",
+      "ctype": "uint8_t",
+      "max_len": null,
+      "note": "0~100. 기기가 미지원이면 255"
+    },
+    {
+      "name": "shuffle",
+      "ctype": "bool",
+      "max_len": null,
+      "note": ""
+    },
+    {
+      "name": "repeat",
+      "ctype": "uint8_t",
+      "max_len": null,
+      "note": "RepeatMode 값 (0=off, 1=context, 2=track)"
+    },
+    {
+      "name": "liked",
+      "ctype": "int8_t",
+      "max_len": null,
+      "note": "1=좋아요, 0=아님, -1=확인 안 됨"
+    },
+    {
+      "name": "device_name",
+      "ctype": "char[]",
+      "max_len": 64,
+      "note": "재생 중인 기기 이름"
+    },
+    {
+      "name": "supports_volume",
+      "ctype": "bool",
+      "max_len": null,
+      "note": "기기가 볼륨 조절을 지원하는지"
+    }
+  ],
+  "constants": {
+    "VOLUME_UNKNOWN": 255,
+    "LIKED_UNKNOWN": -1
+  }
+}
