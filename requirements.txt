@@ -1,0 +1,31 @@
+# Spotify Deck - Python dependencies
+# Python 3.11 권장 (3.10 ~ 3.13 지원)
+#
+#   py -3.11 -m venv .venv
+#   .\.venv\Scripts\Activate.ps1
+#   python -m pip install --upgrade pip
+#   pip install -r requirements.txt
+
+# --- UI ---
+# PySide6 = Qt 6 공식 Python 바인딩 (LGPL).
+# RK3399(ARM64 Linux)에도 배포 가능하여 향후 이식성이 좋다.
+PySide6>=6.7,<7
+
+# --- Spotify Web API ---
+requests>=2.32,<3
+
+# --- 설정 / 비밀키 ---
+python-dotenv>=1.0,<2
+
+# --- 토큰 보관 ---
+# Windows에서는 자격 증명 관리자(Credential Manager)를 백엔드로 사용한다.
+# 백엔드가 없는 환경(헤드리스 RK3399 등)에서는 자동으로 파일 저장으로 폴백한다.
+keyring>=25.0,<26
+
+# --- 웨이브 바 (실시간 오디오 스펙트럼) ---
+# soundcard: WASAPI 루프백으로 '스피커로 나가는 소리'를 캡처한다.
+#            마이크가 아니라서 주변 소음이 섞이지 않는다.
+# numpy    : FFT 연산.
+# 둘 다 없어도 앱은 실행되며, 웨이브 바가 시뮬레이션 모드로 동작한다.
+soundcard>=0.4.2,<0.5
+numpy>=1.24
