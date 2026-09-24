@@ -21,6 +21,7 @@ from PySide6.QtGui import QColor, QLinearGradient, QPainter
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
 from app.audio.base import WaveSource
+from app.ui.palette import AccentPalette
 from app.ui.theme import Colors
 
 #: 피크 점이 떨어지는 속도 (프레임당 비율)
@@ -65,6 +66,7 @@ class WaveBarWidget(QWidget):
 
         self._gradient_cache: QLinearGradient | None = None
         self._cached_height = -1
+        self._accent = AccentPalette.default()
 
         self._timer = QTimer(self)
         self._timer.setInterval(max(8, 1000 // max(1, fps)))
@@ -82,6 +84,12 @@ class WaveBarWidget(QWidget):
 
     def set_playing(self, playing: bool) -> None:
         self._source.set_playing(playing)
+
+    def set_accent(self, palette: AccentPalette) -> None:
+        """앨범에서 뽑은 강조색으로 막대 색을 바꾼다."""
+        self._accent = palette
+        self._gradient_cache = None   # 그라디언트를 다시 만들게 한다
+        self.update()
 
     @property
     def source(self) -> WaveSource:
@@ -135,12 +143,15 @@ class WaveBarWidget(QWidget):
         return self._levels[idx], self._peaks[idx]
 
     def _gradient(self, height: float) -> QLinearGradient:
-        """막대 세로 그라디언트 (아래 진한 초록 → 위 밝은 초록)."""
+        """막대 세로 그라디언트 (아래 진한 색 → 위 밝은 색).
+
+        색은 현재 앨범 아트에서 뽑은 것을 쓴다.
+        """
         if self._gradient_cache is None or self._cached_height != height:
             grad = QLinearGradient(0, height, 0, 0)
-            grad.setColorAt(0.0, QColor(Colors.ACCENT_DIM))
-            grad.setColorAt(0.55, QColor(Colors.ACCENT))
-            grad.setColorAt(1.0, QColor(Colors.ACCENT_HI))
+            grad.setColorAt(0.0, self._accent.dim)
+            grad.setColorAt(0.55, self._accent.base)
+            grad.setColorAt(1.0, self._accent.bright)
             self._gradient_cache = grad
             self._cached_height = height
         return self._gradient_cache
@@ -183,7 +194,7 @@ class WaveBarWidget(QWidget):
             # 바닥 반사 — 같은 막대를 뒤집어 흐리게 그린다.
             if reflection_h > 2 and level > 0.02:
                 ref_h = min(bar_h * 0.45, reflection_h)
-                ref_color = QColor(Colors.ACCENT)
+                ref_color = QColor(self._accent.base)
                 ref_color.setAlphaF(0.16 * min(1.0, level * 1.6))
                 painter.setBrush(ref_color)
                 painter.drawRoundedRect(

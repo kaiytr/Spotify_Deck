@@ -38,6 +38,7 @@ from app.core.deck_controller import ActionResult, DeckController
 from app.core.errors import DeckError, NothingPlayingError
 from app.spotify.models import PlaybackState, RepeatMode, format_duration
 from app.ui.icons import Icon
+from app.ui.palette import AccentPalette
 from app.ui.theme import Colors, build_stylesheet
 from app.ui.widgets.album_art import AlbumArtWidget
 from app.ui.widgets.buttons import IconButton, PlayButton
@@ -80,6 +81,8 @@ class DeckWindow(QMainWindow):
         self._connected = False
         #: 실행 중인 ActionRunner의 강한 참조 (GC로 시그널이 끊기는 것을 막는다)
         self._running_actions: set[ActionRunner] = set()
+        #: 현재 앨범에서 뽑은 강조색
+        self._accent = AccentPalette.default()
 
         self.setWindowTitle("Spotify Deck")
         self.setMinimumSize(420, 320)
@@ -302,6 +305,9 @@ class DeckWindow(QMainWindow):
             lambda v: self._dispatch(DeckAction.VOLUME_SET, value=v)
         )
 
+        # 앨범 아트에서 뽑은 색을 UI 전체에 전파한다.
+        self._album_art.accent_changed.connect(self._apply_accent)
+
         self._poller.state_ready.connect(self._apply_state)
         self._poller.error.connect(self._show_error)
         self._poller.recovered.connect(self._on_recovered)
@@ -355,6 +361,33 @@ class DeckWindow(QMainWindow):
             self._dispatch(DeckAction.VOLUME_SET, value=0)
         else:
             self._dispatch(DeckAction.VOLUME_SET, value=getattr(self, "_muted_volume", 50))
+
+    # -- 강조색 --------------------------------------------------------------
+
+    def _apply_accent(self, palette: AccentPalette) -> None:
+        """앨범 색을 화면 전체에 입힌다.
+
+        곡이 바뀔 때만 호출되므로 비용은 무시할 만하다.
+        버튼은 자체 애니메이션이 있어 색이 부드럽게 전환된다.
+        """
+        self._accent = palette
+
+        self._wave and self._wave.set_accent(palette)
+        self._seek.set_accent(palette)
+        self._volume.set_accent(palette)
+        self._play_btn.set_accent(palette.base, palette.bright)
+
+        for button in (self._shuffle_btn, self._repeat_btn):
+            button.set_accent(palette.base)
+
+        # 좋아요는 하트라서 초록보다 앨범색이 더 자연스럽다.
+        self._like_btn.set_accent(palette.bright)
+
+        # 연결 표시등도 함께 물들여 화면이 하나로 보이게 한다.
+        if self._connected:
+            self._status_dot.setStyleSheet(
+                f"color: {palette.base.name()}; font-size: 13px;"
+            )
 
     # -- 상태 반영 -----------------------------------------------------------
 
@@ -447,7 +480,8 @@ class DeckWindow(QMainWindow):
             return
         self._connected = connected
         if connected:
-            self._status_dot.setStyleSheet(f"color: {Colors.ACCENT}; font-size: 13px;")
+            dot = self._accent.base.name() if self._accent else Colors.ACCENT
+            self._status_dot.setStyleSheet(f"color: {dot}; font-size: 13px;")
             self._status_label.setText("Spotify 연결됨")
             self._status_label.setStyleSheet(f"color: {Colors.TEXT_DIM}; font-size: 12px;")
         else:

@@ -14,6 +14,7 @@ from PySide6.QtCore import QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QMouseEvent, QPainter
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
+from app.ui.palette import AccentPalette
 from app.ui.theme import Colors
 
 
@@ -43,6 +44,7 @@ class ProgressSlider(QWidget):
         self._dragging = False
         self._hovered = False
 
+        self._accent = AccentPalette.default()
         self._track_height = track_height
         self._handle_radius = handle_radius
         self._always_show_handle = always_show_handle
@@ -52,6 +54,11 @@ class ProgressSlider(QWidget):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
         self.setMouseTracking(True)
+
+    def set_accent(self, palette: AccentPalette) -> None:
+        """앨범에서 뽑은 강조색으로 채움 색을 바꾼다."""
+        self._accent = palette
+        self.update()
 
     # -- 값 ------------------------------------------------------------------
 
@@ -164,7 +171,7 @@ class ProgressSlider(QWidget):
 
         # 채워진 부분 — 호버/드래그 시 Spotify 그린으로 강조
         active = self._hovered or self._dragging
-        fill_color = QColor(Colors.ACCENT if active else Colors.TRACK_FILL)
+        fill_color = QColor(self._accent.base) if active else QColor(Colors.TRACK_FILL)
         fill_width = usable * self.ratio
         if fill_width > 0:
             painter.setBrush(fill_color)

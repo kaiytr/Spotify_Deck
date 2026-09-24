@@ -85,6 +85,12 @@ class IconButton(QWidget):
     def active(self) -> bool:
         return self._active
 
+    def set_accent(self, color: QColor) -> None:
+        """켜짐 상태일 때 쓸 색을 앨범 강조색으로 바꾼다."""
+        self._active_color = QColor(color)
+        if self._active:
+            self._animate_to(self._target_color())
+
     def set_active(self, value: bool) -> None:
         """켜짐 상태를 바꾼다 (셔플 on 등). 색이 부드럽게 전환된다."""
         if self._active == value:
@@ -191,12 +197,24 @@ class PlayButton(IconButton):
             parent=parent,
         )
         self._playing = False
+        self._circle = QColor(Colors.ACCENT)
+        self._circle_hover = QColor(Colors.ACCENT_HI)
 
     def set_playing(self, playing: bool) -> None:
         if self._playing == playing:
             return
         self._playing = playing
         self.set_icon(Icon.PAUSE if playing else Icon.PLAY)
+
+    def set_accent(self, color: QColor, hover: QColor | None = None) -> None:
+        """원형 배경색을 앨범 강조색으로 바꾼다.
+
+        아이콘은 계속 검정이므로, 배경이 충분히 밝아야 대비가 유지된다.
+        (palette.py가 명도 하한을 보장한다)
+        """
+        self._circle = QColor(color)
+        self._circle_hover = QColor(hover) if hover is not None else QColor(color).lighter(115)
+        self.update()
 
     def paintEvent(self, event) -> None:  # noqa: N802
         painter = QPainter(self)
@@ -206,9 +224,9 @@ class PlayButton(IconButton):
         if not self._enabled_visual:
             bg = QColor(Colors.SURFACE_HI)
         elif self._hovered:
-            bg = QColor(Colors.ACCENT_HI)
+            bg = self._circle_hover
         else:
-            bg = QColor(Colors.ACCENT)
+            bg = self._circle
 
         inset = 2.0 if self._pressed else 0.0
         circle = QRectF(self.rect()).adjusted(inset, inset, -inset, -inset)

@@ -27,6 +27,7 @@ from PySide6.QtGui import QColor, QPainter, QPainterPath, QPixmap
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
 from app.ui.icons import Icon, draw_icon
+from app.ui.palette import AccentPalette, extract_accent
 from app.ui.theme import Colors
 
 logger = logging.getLogger(__name__)
@@ -82,7 +83,13 @@ class AlbumArtWidget(QWidget):
     """둥근 모서리 앨범 아트.
 
     이미지가 없으면 음표 대신 은은한 플레이스홀더를 그린다.
+
+    Signals:
+        accent_changed(AccentPalette): 새 앨범 아트에서 뽑아낸 강조색.
+            곡이 바뀔 때만 발생하므로 UI가 이걸 받아 테마를 갈아입는다.
     """
+
+    accent_changed = Signal(object)
 
     def __init__(self, *, radius: int = 12, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -101,6 +108,9 @@ class AlbumArtWidget(QWidget):
         # 파이썬 쪽 _ImageSignals가 GC되어 emit 시점에
         # "Signal source has been deleted"로 죽는다.
         self._inflight: set[_ImageLoader] = set()
+
+        #: 현재 앨범에서 뽑아낸 강조색. 같은 색이면 다시 알리지 않는다.
+        self._accent = AccentPalette.default()
 
         # 페이드 전환
         self._fade = 1.0
@@ -128,6 +138,7 @@ class AlbumArtWidget(QWidget):
         if cached is not None:
             self._cache.move_to_end(url)
             self._begin_transition(cached)
+            self._emit_accent(cached)
             return
 
         # 같은 이미지를 두 번 요청하지 않는다.
@@ -147,6 +158,7 @@ class AlbumArtWidget(QWidget):
     def clear(self) -> None:
         self._current_url = None
         self._begin_transition(None)
+        self._emit_accent(None)
 
     # -- 로딩 결과 -----------------------------------------------------------
 
@@ -161,10 +173,22 @@ class AlbumArtWidget(QWidget):
         # 이미 다른 곡으로 넘어갔다면 캐시에만 넣고 화면은 바꾸지 않는다.
         if url == self._current_url:
             self._begin_transition(pixmap)
+            self._emit_accent(pixmap)
 
     def _on_failed(self, url: str) -> None:
         if url == self._pending_url:
             self._pending_url = None
+
+    def _emit_accent(self, pixmap: QPixmap | None) -> None:
+        """앨범 색을 뽑아 알린다. 같은 색이면 알리지 않는다.
+
+        색 추출은 약 5ms로, 곡이 바뀔 때만 일어나므로 UI 스레드에서 해도 된다.
+        """
+        palette = extract_accent(pixmap)
+        if palette == self._accent:
+            return
+        self._accent = palette
+        self.accent_changed.emit(palette)
 
     # -- 페이드 --------------------------------------------------------------
 
