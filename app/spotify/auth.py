@@ -48,6 +48,13 @@ TOKEN_URL = "https://accounts.spotify.com/api/token"
 #: 브라우저 로그인 대기 제한 시간(초)
 LOGIN_TIMEOUT_SECONDS = 300
 
+#: 토큰 요청의 일시적 연결 실패 재시도 횟수.
+#: DNS 실패/TLS 리셋은 요청이 서버에 닿지 않은 것이라 재시도가 안전하다.
+TOKEN_NETWORK_RETRIES = 2
+
+#: 재시도 전 대기(초)
+TOKEN_RETRY_DELAY = 0.6
+
 
 # ---------------------------------------------------------------------------
 #  PKCE 유틸
@@ -351,8 +358,15 @@ class SpotifyAuth:
 
     # --- 토큰 엔드포인트 호출 ---
 
-    def _post_token(self, data: dict) -> dict:
-        """토큰 엔드포인트 POST 공통 처리."""
+    def _post_token(self, data: dict, *, _retries: int = TOKEN_NETWORK_RETRIES) -> dict:
+        """토큰 엔드포인트 POST 공통 처리.
+
+        일시적 연결 실패는 재시도한다.
+        DNS 조회 실패나 TLS 리셋은 요청이 서버에 닿지도 못한 것이라
+        다시 보내도 안전하고, 한 번 실패했다고 사용자에게
+        "다시 로그인하세요"라고 하면 앱이 불안정해 보인다.
+        (SpotifyClient의 API 호출에는 이미 같은 재시도가 들어 있다)
+        """
         try:
             resp = requests.post(
                 TOKEN_URL,
@@ -366,14 +380,19 @@ class SpotifyAuth:
                 hint="백신이나 방화벽의 SSL 검사 설정을 확인해 주세요.",
                 detail=str(exc),
             ) from exc
-        except requests.exceptions.ConnectionError as exc:
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
+            if _retries > 0:
+                logger.debug("토큰 요청 연결 실패 - 재시도합니다: %s", exc)
+                time.sleep(TOKEN_RETRY_DELAY)
+                return self._post_token(data, _retries=_retries - 1)
+
+            if isinstance(exc, requests.exceptions.Timeout):
+                raise NetworkError(
+                    "Spotify 응답이 너무 늦습니다.",
+                    hint="네트워크 상태를 확인하고 다시 시도해 주세요.",
+                    detail=str(exc),
+                ) from exc
             raise NetworkError(detail=str(exc)) from exc
-        except requests.exceptions.Timeout as exc:
-            raise NetworkError(
-                "Spotify 응답이 너무 늦습니다.",
-                hint="네트워크 상태를 확인하고 다시 시도해 주세요.",
-                detail=str(exc),
-            ) from exc
 
         if resp.status_code == 200:
             return resp.json()

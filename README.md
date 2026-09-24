@@ -675,6 +675,29 @@ WaveSource (app/audio/base.py)
 
 ---
 
+## 테스트
+
+```powershell
+python -m pytest
+```
+
+140개의 단위 테스트가 약 1초에 돈다. 네트워크나 오디오 장치, Spotify 계정이 필요 없다.
+
+| 파일 | 검증 내용 |
+|---|---|
+| `test_auth_pkce.py` | RFC 7636 공식 테스트 벡터, 인증 URL 구조(Implicit 금지), 인증 코드 로그 마스킹, 토큰 재시도 |
+| `test_settings.py` | Redirect URI 규칙(`localhost` 거부, 포트 필수), 자리표시자 감지, 폴링 하한 |
+| `test_models.py` | 트랙/에피소드/광고/204 파싱, 진행률 보간, 결측 필드 내성 |
+| `test_client.py` | 403 원인 3가지 구분, 429 vs 할당량, POST 재시도 금지, URI 이중 인코딩 방지 |
+| `test_spectrum.py` | FFT 빈 독점 배정, 주파수→대역 대응, 포화 방지, attack>decay |
+| `test_input_and_tokens.py` | 키 매핑 계약, 입력 계층 격리, 토큰 저장소 원자성 |
+
+테스트는 **실제로 겪은 버그를 고정**한다. 예를 들어 `test_uris_are_not_pre_encoded`는
+URI 이중 인코딩으로 좋아요 기능이 통째로 죽었던 문제를,
+`test_bands_do_not_share_fft_bins`는 베이스 한 음에 막대 7개가 똑같이 치솟던 문제를 막는다.
+
+---
+
 ## 조작법
 
 ### 키보드

@@ -130,6 +130,12 @@ class RateLimitError(DeckError):
     default_hint = "잠시 후 자동으로 다시 시도합니다."
     recoverable = True
 
+    #: True면 메시지에 "N초 후 재시도합니다"를 덧붙인다.
+    #: 기다리면 풀리는 일시적 제한에만 해당한다.
+    #: 할당량 초과처럼 대기로 해결되지 않는 경우는 False로 두어
+    #: 하위 클래스의 고유 안내가 덮이지 않게 한다.
+    announces_retry = True
+
     def __init__(
         self,
         user_message: str | None = None,
@@ -139,8 +145,11 @@ class RateLimitError(DeckError):
         detail: str | None = None,
     ) -> None:
         self.retry_after = retry_after
-        if user_message is None and retry_after:
-            user_message = f"Spotify 요청이 너무 많습니다. {retry_after}초 후 재시도합니다."
+        if user_message is None:
+            if retry_after and self.announces_retry:
+                user_message = f"{self.default_message} {retry_after}초 후 재시도합니다."
+            else:
+                user_message = self.default_message
         super().__init__(user_message, hint=hint, detail=detail)
 
 
@@ -155,6 +164,10 @@ class QuotaExceededError(RateLimitError):
         "개발 모드 앱의 할당량을 모두 사용했습니다.\n"
         "잠시 후 다시 시도하거나 갱신 주기를 늘려 주세요."
     )
+
+    # 할당량은 몇 초 기다린다고 풀리지 않는다.
+    # "30초 후 재시도합니다"라고 하면 사용자를 오해시킨다.
+    announces_retry = False
 
 
 class SpotifyApiError(DeckError):
