@@ -50,6 +50,7 @@ from app.ui.palette import AccentPalette
 from app.ui.theme import Colors, build_stylesheet
 from app.ui.widgets.album_art import AlbumArtWidget
 from app.ui.widgets.buttons import IconButton, IconLabel, PlayButton
+from app.ui.widgets.marquee import MarqueeLabel
 from app.ui.widgets.slider import ProgressSlider
 from app.ui.widgets.wave_bar import WaveBarWidget
 from app.ui.worker import ActionRunner, PollWorker
@@ -110,6 +111,8 @@ class DeckWindow(QMainWindow):
         self._device_frame: QWidget | None = None
         #: 실물 크기 보정 배율 (--true-size). None이면 보정 없음.
         self._true_size_scale = true_size_scale
+        #: 시계에 마지막으로 그린 문자열 (분이 바뀔 때만 다시 그린다)
+        self._clock_text = ""
 
         profile = self._layout
         self.setWindowTitle("Spotify Deck")
@@ -180,20 +183,13 @@ class DeckWindow(QMainWindow):
         root.addWidget(self._build_header())
         root.addSpacing(profile.section_gap)
 
-        # 미디어 블록은 stretch 0 — 앨범 아트 높이만큼만 차지한다.
-        # stretch 1을 주면 남는 세로를 전부 흡수해 웨이브와 진행 바 사이에
-        # 빈 공간이 크게 벌어진다.
+        # 미디어 블록에 진행 바까지 포함한다.
+        # 기준 디자인은 진행 바가 화면 전체 폭이 아니라 **곡 정보와 같은
+        # 왼쪽 끝**에서 시작한다. 앨범 아트 아래를 비우고 오른쪽 열에 맞춘다.
         root.addWidget(self._build_media_block(profile), 0)
-        root.addSpacing(profile.section_gap)
 
-        # 남는 세로를 진행 바 위 1 : 아래 2 로 나눈다.
-        #
-        # 전부 아래로 몰면 진행 바가 앨범 아트에 바짝 붙어 답답하다.
-        # 위쪽에도 일부를 줘서 아트와 거리를 두고, 그래도 아래를 더 크게 둬
-        # 컨트롤은 화면 아래쪽에 머무르게 한다.
+        # 남는 세로는 여기로 몰아 컨트롤을 아래쪽에 붙인다.
         root.addStretch(1)
-        root.addWidget(self._build_progress(profile))
-        root.addStretch(2)
 
         root.addWidget(self._build_controls(profile))
 
@@ -216,9 +212,14 @@ class DeckWindow(QMainWindow):
     # -- 구성 요소 -----------------------------------------------------------
 
     def _build_media_block(self, profile: LayoutProfile) -> QWidget:
-        """앨범 아트 + 곡 정보 + 웨이브.
+        """앨범 아트 + (곡 정보 · 웨이브 · 진행 바).
 
-        아트는 고정 정사각형이고, 오른쪽에 텍스트와 웨이브가 쌓인다.
+        기준 디자인처럼 오른쪽 열이 하나의 덩어리다.
+        진행 바도 곡 정보와 같은 왼쪽 끝에서 시작한다.
+
+        곡 정보는 모두 **높이가 고정된 한 줄 마키 라벨**이다.
+        줄바꿈을 쓰면 긴 제목이 두 줄이 되면서 웨이브와 진행 바를 밀어내
+        곡이 바뀔 때마다 화면이 들썩인다.
         """
         block = QWidget()
         row = QHBoxLayout(block)
@@ -235,28 +236,20 @@ class DeckWindow(QMainWindow):
         col.setContentsMargins(0, 0, 0, 0)
         col.setSpacing(0)
 
-        self._title_label = QLabel("재생 중인 음악이 없습니다")
         title_font = QFont()
         title_font.setPointSize(profile.title_pt)
         title_font.setWeight(QFont.Weight.Bold)
-        self._title_label.setFont(title_font)
-        self._title_label.setWordWrap(True)
-        self._title_label.setStyleSheet(f"color: {Colors.TEXT};")
+        self._title_label = MarqueeLabel(
+            "재생 중인 음악이 없습니다", font=title_font, color=Colors.TEXT
+        )
 
-        self._artist_label = QLabel("")
         artist_font = QFont()
         artist_font.setPointSize(profile.artist_pt)
-        self._artist_label.setFont(artist_font)
-        # 줄바꿈을 켜야 한다. 끄면 폭을 넘는 글자가 소리 없이 잘려
-        # "...여기에 표시됩" 처럼 문장이 끊긴다.
-        # 아티스트 이름이 긴 경우에도 같은 문제가 생긴다.
-        self._artist_label.setWordWrap(True)
-        self._artist_label.setStyleSheet(f"color: {Colors.TEXT_DIM};")
+        self._artist_label = MarqueeLabel("", font=artist_font, color=Colors.TEXT_DIM)
 
-        self._album_label = QLabel("")
-        self._album_label.setStyleSheet(
-            f"color: {Colors.TEXT_MUTED}; font-size: {profile.album_pt + 2}px;"
-        )
+        album_font = QFont()
+        album_font.setPointSize(profile.album_pt)
+        self._album_label = MarqueeLabel("", font=album_font, color=Colors.TEXT_MUTED)
         self._album_label.setVisible(profile.show_album_line)
 
         col.addWidget(self._title_label)
@@ -266,17 +259,19 @@ class DeckWindow(QMainWindow):
             col.addSpacing(1)
             col.addWidget(self._album_label)
 
-        # 웨이브는 곡 정보와 아트 아래쪽 사이에 둔다.
+        # 남는 세로는 곡 정보 **바로 아래**에 몰아, 웨이브와 진행 바를
+        # 블록 아래쪽으로 내린다.
         #
-        # 위쪽 stretch 1 : 아래쪽 stretch 2 로 나눠 남는 공간의 약 1/3 지점에
-        # 놓는다. 텍스트에 딱 붙이면 답답하고, stretch를 아래에만 주면
-        # 아트 바닥까지 밀려 내려가 텍스트와 사이가 크게 벌어진다.
+        # 기준 디자인도 시간 라벨이 앨범 아트 바닥과 나란하다.
+        # 중간에 stretch를 또 넣으면 웨이브와 진행 바 사이가 벌어져
+        # 아트 옆이 휑해 보인다.
+        col.addStretch(1)
+
         if self._wave is not None:
-            col.addStretch(1)
             col.addWidget(self._wave)
-            col.addStretch(2)
-        else:
-            col.addStretch(1)
+            col.addSpacing(profile.section_gap)
+
+        col.addWidget(self._build_progress(profile))
 
         row.addWidget(info, 1)
         return block
@@ -335,34 +330,40 @@ class DeckWindow(QMainWindow):
         self._repeat_btn = IconButton(
             Icon.REPEAT, size=profile.toggle_button, tooltip="반복  (R)"
         )
-        self._more_btn = IconButton(
-            Icon.MORE, size=profile.toggle_button, tooltip="더보기"
-        )
 
         bar = QWidget()
         row = QHBoxLayout(bar)
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(0)
 
-        # 줄 **양 끝에는 stretch를 넣지 않는다.**
+        # 기준 디자인의 순서: 좋아요 · 이전 · [재생] · 다음 · 셔플 · 반복
         #
-        # 넣으면 버튼 전체가 안쪽으로 밀려 왼쪽에 빈 공간이 생기고,
-        # 화면이 오른쪽으로 치우쳐 보인다.
-        # 첫 버튼은 왼쪽 여백에, 마지막 버튼은 오른쪽 여백에 붙이고
-        # 사이만 균등하게 벌린다 (기준 디자인과 같은 배치).
-        buttons = (
-            self._like_btn,
-            self._shuffle_btn,
-            self._prev_btn,
-            self._play_btn,
-            self._next_btn,
-            self._repeat_btn,
-            self._more_btn,
-        )
-        for index, button in enumerate(buttons):
-            if index:
-                row.addStretch(1)
-            row.addWidget(button, 0, Qt.AlignmentFlag.AlignVCenter)
+        # **재생 버튼을 화면 정중앙에 고정**한다.
+        # 버튼 묶음 전체를 가운데 정렬하면 재생이 3번째라 중앙에서 밀린다.
+        # 좌우를 같은 stretch를 가진 상자로 나누고 그 사이에 재생을 두면
+        # 양쪽 개수가 달라도(2 : 3) 재생은 항상 정중앙에 온다.
+        gap = profile.column_gap + 6
+
+        left = QHBoxLayout()
+        left.setContentsMargins(0, 0, 0, 0)
+        left.setSpacing(gap)
+        left.addStretch(1)
+        left.addWidget(self._like_btn, 0, Qt.AlignmentFlag.AlignVCenter)
+        left.addWidget(self._prev_btn, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        right = QHBoxLayout()
+        right.setContentsMargins(0, 0, 0, 0)
+        right.setSpacing(gap)
+        right.addWidget(self._next_btn, 0, Qt.AlignmentFlag.AlignVCenter)
+        right.addWidget(self._shuffle_btn, 0, Qt.AlignmentFlag.AlignVCenter)
+        right.addWidget(self._repeat_btn, 0, Qt.AlignmentFlag.AlignVCenter)
+        right.addStretch(1)
+
+        row.addLayout(left, 1)
+        row.addSpacing(gap)
+        row.addWidget(self._play_btn, 0, Qt.AlignmentFlag.AlignVCenter)
+        row.addSpacing(gap)
+        row.addLayout(right, 1)
 
         return bar
 
@@ -519,16 +520,56 @@ class DeckWindow(QMainWindow):
             f"color: {Colors.TEXT_DIM}; font-size: {size}px;"
         )
 
+        # 기기 이름은 화면에 두지 않고 더보기(...) 메뉴로 옮겼다.
+        # 오른쪽 위는 기준 디자인처럼 WiFi + 시계가 차지한다.
+        # 라벨 자체는 남겨 둔다 — 상태 반영 코드가 기기 이름을 여기 보관하고
+        # 메뉴를 열 때 그 값을 읽는다.
         self._device_label = QLabel("")
-        self._device_label.setStyleSheet(
-            f"color: {Colors.TEXT_MUTED}; font-size: {size}px;"
+        self._device_label.hide()
+
+        self._wifi = IconLabel(
+            Icon.WIFI, size=self._layout.meta_pt + 8, color=Colors.TEXT_DIM
+        )
+
+        self._clock_label = QLabel("--:--")
+        self._clock_label.setStyleSheet(
+            f"color: {Colors.TEXT_DIM}; font-size: {size + 1}px;"
+        )
+
+        # 더보기(...)는 컨트롤 줄이 아니라 여기 둔다.
+        #
+        # 컨트롤 줄에 넣으면 재생 버튼 오른쪽이 4개(다음·셔플·반복·더보기),
+        # 왼쪽이 2개(좋아요·이전)가 되어 오른쪽 묶음이 절반 폭을 넘고
+        # 재생 버튼이 화면 중앙에서 밀려난다.
+        # 설정 성격의 메뉴라 상단바가 제자리이기도 하다.
+        self._more_btn = IconButton(
+            Icon.MORE, size=self._layout.meta_pt + 12, tooltip="더보기"
         )
 
         layout.addWidget(self._logo)
         layout.addWidget(self._status_label)
         layout.addStretch(1)
-        layout.addWidget(self._device_label)
+        layout.addWidget(self._wifi)
+        layout.addSpacing(2)
+        layout.addWidget(self._clock_label)
+        layout.addSpacing(6)
+        layout.addWidget(self._more_btn)
+
+        self._update_clock()
         return header
+
+    def _update_clock(self) -> None:
+        """시계를 현재 시각으로 갱신한다.
+
+        1초마다 문자열을 다시 만들 필요는 없으므로 분이 바뀔 때만 갱신한다.
+        (진행률 타이머가 100ms마다 호출하므로 비교를 넣지 않으면 낭비가 크다)
+        """
+        from datetime import datetime
+
+        now = datetime.now().strftime("%H:%M")
+        if now != self._clock_text:
+            self._clock_text = now
+            self._clock_label.setText(now)
 
     def _build_footer(self) -> QWidget:
         """하단: 상태 배너(오류/안내) + 단축키 힌트."""
@@ -654,10 +695,19 @@ class DeckWindow(QMainWindow):
             """
         )
 
+        # 현재 재생 기기를 메뉴 맨 위에 보여 준다 (상단바에서 뺀 정보).
+        device = self._state.device
+        if device.name:
+            header = menu.addAction(f"{device.name} · {device.icon_hint}")
+            header.setEnabled(False)
+            menu.addSeparator()
+
+        # 볼륨 올리기/내리기는 넣지 않는다.
+        # 메뉴를 열고 항목을 고르는 동작을 반복하는 건 볼륨 조절 방식으로
+        # 번거롭다. 위/아래 방향키가 즉시 동작하고, 실물 기기에서는
+        # 로터리 엔코더가 그 역할을 한다.
         muted = self._state.volume == 0
         menu.addAction("음소거 해제" if muted else "음소거", self._toggle_mute)
-        menu.addAction("볼륨 올리기", lambda: self._dispatch(DeckAction.VOLUME_UP))
-        menu.addAction("볼륨 내리기", lambda: self._dispatch(DeckAction.VOLUME_DOWN))
         menu.addSeparator()
         menu.addAction("새로고침", lambda: self._dispatch(DeckAction.REFRESH))
         menu.addSeparator()
@@ -778,6 +828,8 @@ class DeckWindow(QMainWindow):
 
     def _update_progress_display(self) -> None:
         """폴링 사이를 보간해 진행 바를 부드럽게 움직인다."""
+        self._update_clock()
+
         state = self._state
         if state.duration_ms <= 0:
             self._elapsed_label.setText("--:--")
@@ -800,10 +852,14 @@ class DeckWindow(QMainWindow):
             # 정상일 때는 마크만 두고 글자를 지운다.
             # "연결됨"은 굳이 읽을 필요가 없고, 작은 화면에서 자리만 차지한다.
             self._logo.set_color(self._accent.base)
+            self._wifi.set_icon(Icon.WIFI)
+            self._wifi.set_color(QColor(Colors.TEXT_DIM))
             self._status_label.setText("")
             self._status_label.hide()
         else:
             self._logo.set_color(QColor(Colors.DANGER))
+            self._wifi.set_icon(Icon.WIFI_OFF)
+            self._wifi.set_color(QColor(Colors.DANGER))
             self._status_label.setText("연결 끊김")
             self._status_label.setStyleSheet(
                 f"color: {Colors.DANGER}; font-size: {size}px;"

@@ -25,6 +25,8 @@ BASE_SIZE = 24.0
 class Icon(str, Enum):
     SPOTIFY = "spotify"
     MORE = "more"
+    WIFI = "wifi"
+    WIFI_OFF = "wifi_off"
     PLAY = "play"
     PAUSE = "pause"
     NEXT = "next"
@@ -72,7 +74,7 @@ def draw_icon(
 
     filled = {
         Icon.PLAY, Icon.PAUSE, Icon.NEXT, Icon.PREVIOUS, Icon.HEART_FILLED,
-        Icon.SPOTIFY, Icon.MORE,
+        Icon.SPOTIFY, Icon.MORE, Icon.WIFI, Icon.WIFI_OFF,
     }
     if icon in filled:
         painter.setPen(Qt.PenStyle.NoPen)
@@ -121,6 +123,58 @@ def _spotify(p: QPainter, color: QColor) -> None:
         path.moveTo(*start)
         path.quadTo(control[0], control[1], end[0], end[1])
         p.drawPath(path)
+
+
+#: WiFi 아이콘의 호 3개 — (시작, 제어점, 끝, 선 두께)
+#: 아래 점에서 위로 갈수록 넓어진다.
+_WIFI_ARCS = (
+    ((8.6, 14.6), (12.0, 11.6), (15.4, 14.6), 2.0),
+    ((5.8, 11.2), (12.0, 6.6), (18.2, 11.2), 2.0),
+    ((3.2, 8.0), (12.0, 1.9), (20.8, 8.0), 2.0),
+)
+_WIFI_DOT = (12.0, 18.4, 1.5)   # (cx, cy, r)
+
+
+def _wifi_arcs(p: QPainter, color: QColor, *, faded: tuple[int, ...] = ()) -> None:
+    """WiFi 호와 점을 그린다.
+
+    Args:
+        faded: 흐리게 그릴 호의 인덱스 (연결 끊김 표현용).
+    """
+    cx, cy, r = _WIFI_DOT
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(color)
+    p.drawEllipse(QRectF(cx - r, cy - r, r * 2, r * 2))
+
+    p.setBrush(Qt.BrushStyle.NoBrush)
+    for index, (start, control, end, width) in enumerate(_WIFI_ARCS):
+        stroke = QColor(color)
+        if index in faded:
+            stroke.setAlphaF(0.25)
+        pen = QPen(stroke, width)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        p.setPen(pen)
+
+        path = QPainterPath()
+        path.moveTo(*start)
+        path.quadTo(control[0], control[1], end[0], end[1])
+        p.drawPath(path)
+
+
+def _wifi(p: QPainter, color: QColor) -> None:
+    """연결됨 — 호 3개가 모두 선명하다."""
+    _wifi_arcs(p, color)
+
+
+def _wifi_off(p: QPainter, color: QColor) -> None:
+    """연결 끊김 — 바깥 호 2개를 흐리게 하고 사선을 긋는다."""
+    _wifi_arcs(p, color, faded=(1, 2))
+
+    pen = QPen(color, 2.0)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    p.setPen(pen)
+    p.setBrush(Qt.BrushStyle.NoBrush)
+    p.drawLine(QPointF(4.5, 19.5), QPointF(19.5, 4.5))
 
 
 def _more(p: QPainter, color: QColor) -> None:
@@ -344,6 +398,8 @@ def _device(p: QPainter, color: QColor) -> None:
 _PAINTERS = {
     Icon.SPOTIFY: _spotify,
     Icon.MORE: _more,
+    Icon.WIFI: _wifi,
+    Icon.WIFI_OFF: _wifi_off,
     Icon.PLAY: _play,
     Icon.PAUSE: _pause,
     Icon.NEXT: _next,

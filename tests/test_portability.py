@@ -214,23 +214,28 @@ def test_compact_volume_row_fits():
     )
 
 
+#: 상단바(로고·시계) 높이 추정치
+_HEADER_HEIGHT = 20
+
+
 def test_compact_stack_fits_vertically():
     """세로 스택 전체가 320px 안에 들어가야 한다.
 
     넘치면 마지막 줄(컨트롤)이 화면 밖으로 밀려 안 보인다.
     앨범 아트를 키울 때 이 검사가 한계를 잡아 준다.
+
+    진행 바는 **미디어 블록 안**(앨범 아트 옆 열)에 있으므로
+    별도 줄로 세지 않는다. 블록 높이는 아트 높이가 결정한다.
     """
     p = COMPACT_480
     gap = p.section_gap
     needed = (
         p.margin_v * 2
-        + 20                              # 상단바
+        + _HEADER_HEIGHT
         + gap
-        + p.art_edge                      # 미디어 블록 (아트가 가장 높다)
+        + p.art_edge          # 미디어 블록 = 아트 높이
         + gap
-        + p.seek_height + p.meta_pt + 4   # 진행 바 + 시간
-        + gap
-        + p.play_button                   # 컨트롤 줄
+        + p.play_button       # 컨트롤 줄
     )
     if p.show_volume:
         needed += max(4, gap - 4) + p.seek_height
@@ -238,6 +243,22 @@ def test_compact_stack_fits_vertically():
     assert p.window_height >= needed, (
         f"세로 {p.window_height}px < 필요 {needed}px — 아래 줄이 잘린다. "
         f"art_size를 줄이세요 (현재 {p.art_edge}px)."
+    )
+
+
+def test_compact_info_column_fits_beside_art():
+    """곡 정보 + 웨이브 + 진행 바가 앨범 아트 높이 안에 들어가야 한다.
+
+    넘치면 미디어 블록이 아트보다 높아져 컨트롤을 밀어낸다.
+    아트를 **줄일 때** 걸리는 검사다 (키울 때는 test_..._fits_vertically).
+    """
+    p = COMPACT_480
+    # 글자 높이는 pt의 약 1.5배로 잡는다 (폰트 어센트·디센트 포함).
+    text = int((p.title_pt + p.artist_pt + p.album_pt) * 1.5) + 6
+    needed = text + p.wave_height + p.section_gap + p.seek_height + p.meta_pt + 4
+
+    assert p.art_edge >= needed, (
+        f"아트 {p.art_edge}px < 오른쪽 열 {needed}px — 블록이 아트보다 높아진다"
     )
 
 
