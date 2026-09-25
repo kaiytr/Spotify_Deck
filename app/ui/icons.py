@@ -23,6 +23,8 @@ BASE_SIZE = 24.0
 
 
 class Icon(str, Enum):
+    SPOTIFY = "spotify"
+    MORE = "more"
     PLAY = "play"
     PAUSE = "pause"
     NEXT = "next"
@@ -68,7 +70,10 @@ def draw_icon(
     )
     painter.scale(scale, scale)
 
-    filled = {Icon.PLAY, Icon.PAUSE, Icon.NEXT, Icon.PREVIOUS, Icon.HEART_FILLED}
+    filled = {
+        Icon.PLAY, Icon.PAUSE, Icon.NEXT, Icon.PREVIOUS, Icon.HEART_FILLED,
+        Icon.SPOTIFY, Icon.MORE,
+    }
     if icon in filled:
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(color)
@@ -86,6 +91,45 @@ def draw_icon(
 # ---------------------------------------------------------------------------
 #  개별 아이콘 (24x24 좌표계)
 # ---------------------------------------------------------------------------
+
+
+def _spotify(p: QPainter, color: QColor) -> None:
+    """Spotify 마크 — 채워진 원 + 음파 3개.
+
+    원은 전달받은 색으로 칠하고, 음파는 배경색으로 '파낸다'.
+    배경색으로 그리므로 어떤 원 색에서도 음파가 또렷하게 보인다.
+    """
+    from app.ui.theme import Colors
+
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(color)
+    p.drawEllipse(QRectF(1.5, 1.5, 21, 21))
+
+    # 음파 3개. 위에서 아래로 갈수록 좁아지고 얇아진다.
+    arcs = (
+        ((5.6, 9.4), (12.0, 6.2), (18.4, 9.4), 2.5),
+        ((7.0, 13.2), (12.0, 10.6), (17.0, 13.2), 2.1),
+        ((8.4, 16.6), (12.0, 14.5), (15.6, 16.6), 1.8),
+    )
+    p.setBrush(Qt.BrushStyle.NoBrush)
+    for start, control, end, width in arcs:
+        pen = QPen(QColor(Colors.BG), width)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        p.setPen(pen)
+
+        path = QPainterPath()
+        path.moveTo(*start)
+        path.quadTo(control[0], control[1], end[0], end[1])
+        p.drawPath(path)
+
+
+def _more(p: QPainter, color: QColor) -> None:
+    """가로로 놓인 점 세 개 (더보기)."""
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(color)
+    radius = 1.6
+    for cx in (5.5, 12.0, 18.5):
+        p.drawEllipse(QRectF(cx - radius, 12 - radius, radius * 2, radius * 2))
 
 
 def _play(p: QPainter, color: QColor) -> None:
@@ -151,27 +195,69 @@ def _arrow_head(p: QPainter, tip: QPointF, *, up: bool) -> None:  # noqa: ARG001
     p.drawPath(path)
 
 
+#: 반복 아이콘의 고리 치수 (24x24 좌표계)
+_LOOP_TOP = 7.0
+_LOOP_BOTTOM = 17.0
+_LOOP_LEFT = 4.0
+_LOOP_RIGHT = 20.0
+_LOOP_RADIUS = 3.5
+_ARROW = 2.8
+
+
 def _repeat_base(p: QPainter) -> None:
-    """반복 화살표 테두리 (숫자 없음)."""
+    """반복 고리 (숫자 없음).
+
+    가로로 납작한 둥근 사각형 고리다. 두 획으로 나뉜다.
+
+        ┌──────────────▶     위: 왼쪽 세로 → 모서리 → 오른쪽으로, 끝에 화살촉
+        │              │
+        ◀──────────────┘     아래: 오른쪽 세로 → 모서리 → 왼쪽으로, 끝에 화살촉
+
+    이전 구현은 화살촉을 선이 끝나는 곳이 아닌 엉뚱한 좌표에 그려서
+    화살표가 고리에서 떨어져 떠 있었다. 여기서는 각 획의 마지막 점에
+    화살촉을 붙여 하나의 도형으로 읽히게 한다.
+    """
+    top = _LOOP_TOP
+    bottom = _LOOP_BOTTOM
+    left = _LOOP_LEFT
+    right = _LOOP_RIGHT
+    r = _LOOP_RADIUS
+
+    # --- 위쪽 획: 왼쪽 세로 → 둥근 모서리 → 오른쪽 가로 ---
+    upper = QPainterPath()
+    upper.moveTo(left, bottom - r)          # 왼쪽 아래에서 시작
+    upper.lineTo(left, top + r)             # 위로
+    upper.quadTo(left, top, left + r, top)  # 왼쪽 위 모서리
+    upper.lineTo(right - _ARROW, top)       # 오른쪽으로 (화살촉 자리는 남긴다)
+    p.drawPath(upper)
+    _arrow_right(p, right - _ARROW + 0.6, top)
+
+    # --- 아래쪽 획: 오른쪽 세로 → 둥근 모서리 → 왼쪽 가로 ---
+    lower = QPainterPath()
+    lower.moveTo(right, top + r)                      # 오른쪽 위에서 시작
+    lower.lineTo(right, bottom - r)                   # 아래로
+    lower.quadTo(right, bottom, right - r, bottom)    # 오른쪽 아래 모서리
+    lower.lineTo(left + _ARROW, bottom)               # 왼쪽으로
+    p.drawPath(lower)
+    _arrow_left(p, left + _ARROW - 0.6, bottom)
+
+
+def _arrow_right(p: QPainter, tip_x: float, y: float) -> None:
+    """오른쪽을 향하는 화살촉. tip이 선의 끝에 정확히 붙는다."""
     path = QPainterPath()
-    path.moveTo(7, 5.5)
-    path.lineTo(16, 5.5)
-    path.cubicTo(19, 5.5, 20.5, 7.5, 20.5, 10)
-    path.lineTo(20.5, 11.5)
+    path.moveTo(tip_x - _ARROW, y - _ARROW)
+    path.lineTo(tip_x, y)
+    path.lineTo(tip_x - _ARROW, y + _ARROW)
     p.drawPath(path)
 
-    p.drawLine(QPointF(17.5, 3), QPointF(20.5, 5.5))
-    p.drawLine(QPointF(17.5, 8), QPointF(20.5, 5.5))
 
-    path2 = QPainterPath()
-    path2.moveTo(17, 18.5)
-    path2.lineTo(8, 18.5)
-    path2.cubicTo(5, 18.5, 3.5, 16.5, 3.5, 14)
-    path2.lineTo(3.5, 12.5)
-    p.drawPath(path2)
-
-    p.drawLine(QPointF(6.5, 21), QPointF(3.5, 18.5))
-    p.drawLine(QPointF(6.5, 16), QPointF(3.5, 18.5))
+def _arrow_left(p: QPainter, tip_x: float, y: float) -> None:
+    """왼쪽을 향하는 화살촉."""
+    path = QPainterPath()
+    path.moveTo(tip_x + _ARROW, y - _ARROW)
+    path.lineTo(tip_x, y)
+    path.lineTo(tip_x + _ARROW, y + _ARROW)
+    p.drawPath(path)
 
 
 def _repeat(p: QPainter, color: QColor) -> None:
@@ -179,14 +265,24 @@ def _repeat(p: QPainter, color: QColor) -> None:
 
 
 def _repeat_one(p: QPainter, color: QColor) -> None:
+    """한 곡 반복 — 고리 가운데에 '1'.
+
+    '1'은 고리 안쪽 빈 공간(y 7~17의 가운데)에 놓는다.
+    이전에는 아래쪽 가로선과 겹쳐 뭉개져 보였다.
+    """
     _repeat_base(p)
-    # 가운데 '1' 표시
+
+    cx = (_LOOP_LEFT + _LOOP_RIGHT) / 2
+    cy = (_LOOP_TOP + _LOOP_BOTTOM) / 2
+
     pen = p.pen()
-    pen.setWidthF(1.8)
+    pen.setWidthF(1.7)
     p.setPen(pen)
-    p.drawLine(QPointF(11.2, 14.2), QPointF(12.4, 13.2))
-    p.drawLine(QPointF(12.4, 13.2), QPointF(12.4, 17.5))
-    p.drawLine(QPointF(11.0, 17.5), QPointF(13.8, 17.5))
+
+    # 숫자 1: 왼쪽 위 사선 + 세로 획 + 아래 받침
+    p.drawLine(QPointF(cx - 1.4, cy - 1.4), QPointF(cx, cy - 2.4))
+    p.drawLine(QPointF(cx, cy - 2.4), QPointF(cx, cy + 2.4))
+    p.drawLine(QPointF(cx - 1.5, cy + 2.4), QPointF(cx + 1.5, cy + 2.4))
 
 
 def _heart_path() -> QPainterPath:
@@ -246,6 +342,8 @@ def _device(p: QPainter, color: QColor) -> None:
 
 
 _PAINTERS = {
+    Icon.SPOTIFY: _spotify,
+    Icon.MORE: _more,
     Icon.PLAY: _play,
     Icon.PAUSE: _pause,
     Icon.NEXT: _next,

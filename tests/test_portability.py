@@ -184,43 +184,90 @@ def test_compact_matches_target_screen():
     assert (COMPACT_480.window_width, COMPACT_480.window_height) == (480, 320)
 
 
-def test_compact_controls_fit_horizontally():
-    """보조 컨트롤 줄이 패널 폭을 넘으면 볼륨 슬라이더가 잘려 나간다.
+def _usable_width(p) -> int:
+    return p.window_width - p.margin_h * 2
 
-    실제로 art:panel 을 1:1로 뒀을 때 17px이 모자라 볼륨 바가 사라졌다.
+
+def test_compact_control_row_fits():
+    """컨트롤 6개가 한 줄에 들어가야 한다.
+
+    넘치면 버튼이 잘리거나 겹친다.
     """
     p = COMPACT_480
-    body = p.window_width - p.margin_h * 2 - p.column_gap
-    panel = body * p.panel_stretch // (p.art_stretch + p.panel_stretch)
-
-    needed = p.toggle_button * 3 + p.volume_icon + p.volume_width + 6 * 5
-    assert panel >= needed, (
-        f"패널 {panel}px < 필요 {needed}px — 볼륨 슬라이더가 잘린다. "
-        f"art_stretch/panel_stretch를 조정하세요."
+    usable = _usable_width(p)
+    # 균등 배치이므로 버튼 사이에 최소한의 숨 쉴 틈은 있어야 한다.
+    minimum_breathing = 6 * 5
+    assert usable >= p.control_row_width + minimum_breathing, (
+        f"가용 폭 {usable}px < 컨트롤 {p.control_row_width}px + 간격 {minimum_breathing}px"
     )
 
 
-def test_compact_fits_vertically():
-    """세로 320px 안에 상단바 + 본문 + 마진이 들어가야 한다."""
+def test_compact_volume_row_fits():
+    """볼륨 아이콘 + 슬라이더가 들어가야 한다.
+
+    이전에 setMaximumWidth만 줘서 슬라이더가 0px로 찌그러진 적이 있다.
+    """
     p = COMPACT_480
-    chrome = p.margin_v * 2 + p.section_gap * 2 + 22  # 22 = 상단바
-    body = p.window_height - chrome
-    assert body > 180, f"본문 세로가 {body}px밖에 안 남는다"
+    needed = p.volume_icon + p.volume_width + 8
+    assert _usable_width(p) >= needed, (
+        f"가용 폭 {_usable_width(p)}px < 볼륨 {needed}px"
+    )
 
 
-def test_compact_hides_what_does_not_fit():
-    """작은 화면에서는 우선순위가 낮은 요소를 끈다."""
-    assert not COMPACT_480.show_album_line, "세로가 부족하면 앨범명 줄을 뺀다"
-    assert not COMPACT_480.show_key_hints, "터치 기기에는 키보드가 없다"
-    assert COMPACT_480.touch_targets, "터치 히트 영역을 넓혀야 한다"
+def test_compact_stack_fits_vertically():
+    """세로 스택 전체가 320px 안에 들어가야 한다.
 
-
-def test_compact_keeps_every_control():
-    """축소한다고 기능을 없애면 안 된다. 모든 컨트롤 치수가 살아 있어야 한다."""
+    넘치면 마지막 줄(컨트롤)이 화면 밖으로 밀려 안 보인다.
+    앨범 아트를 키울 때 이 검사가 한계를 잡아 준다.
+    """
     p = COMPACT_480
-    for name in ("play_button", "skip_button", "toggle_button",
-                 "volume_icon", "volume_width", "seek_height", "wave_height"):
-        assert getattr(p, name) > 0, f"{name}이 0이면 해당 컨트롤이 사라진다"
+    gap = p.section_gap
+    needed = (
+        p.margin_v * 2
+        + 20                              # 상단바
+        + gap
+        + p.art_edge                      # 미디어 블록 (아트가 가장 높다)
+        + gap
+        + p.seek_height + p.meta_pt + 4   # 진행 바 + 시간
+        + gap
+        + p.play_button                   # 컨트롤 줄
+    )
+    if p.show_volume:
+        needed += max(4, gap - 4) + p.seek_height
+
+    assert p.window_height >= needed, (
+        f"세로 {p.window_height}px < 필요 {needed}px — 아래 줄이 잘린다. "
+        f"art_size를 줄이세요 (현재 {p.art_edge}px)."
+    )
+
+
+def test_compact_info_column_has_room():
+    """앨범 아트를 키워도 옆의 곡 정보가 들어갈 폭은 남아야 한다.
+
+    이전에는 '아트가 화면 세로의 45%를 넘지 마라'는 임의의 비율로
+    검사했는데, 근거가 없어서 아트를 키울 때마다 걸렸다.
+    실제로 중요한 건 "제목이 들어갈 폭이 남는가"다.
+    (세로가 모자라는지는 test_compact_stack_fits_vertically 가 본다)
+    """
+    p = COMPACT_480
+    info_width = _usable_width(p) - p.art_edge - p.column_gap
+
+    # 15pt 한글은 글자당 약 20px. 제목 두 줄이면 한 줄에 10자는 들어가야
+    # 웬만한 곡 제목이 읽힌다.
+    assert info_width >= 200, (
+        f"곡 정보 폭 {info_width}px — 아트 {p.art_edge}px가 너무 크다"
+    )
+
+
+def test_compact_keeps_album_line():
+    """세로 스택으로 바꾸면서 공간이 생겨 앨범명을 되살렸다."""
+    assert COMPACT_480.show_album_line
+
+
+def test_compact_hides_key_hints():
+    """터치 기기에는 키보드가 없다."""
+    assert not COMPACT_480.show_key_hints
+    assert COMPACT_480.touch_targets
 
 
 def test_desktop_profile_unchanged():

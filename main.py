@@ -112,6 +112,11 @@ def main() -> int:
         help="전체화면 + 마우스 커서 숨김 (키오스크 모드, 실제 기기용)",
     )
     parser.add_argument(
+        "--true-size",
+        action="store_true",
+        help="모니터 DPI를 읽어 실물 4인치 크기로 축소해 보여준다 (--compact 필요)",
+    )
+    parser.add_argument(
         "--log-file",
         metavar="경로",
         help="로그를 파일에도 남긴다 (콘솔이 없는 기기용). 예: logs/deck.log",
@@ -198,12 +203,40 @@ def main() -> int:
     if args.compact:
         logger.info("Compact 레이아웃 (480x320, ESP32 목표 화면)")
 
+    # --true-size: 모니터 픽셀 밀도를 읽어 실물 크기로 축소한다.
+    # 480x320은 픽셀 수일 뿐이라, 4인치 패널(144 PPI)보다 성긴 모니터에서는
+    # 그냥 띄우면 실물보다 30~50% 크게 보인다.
+    true_size_scale = None
+    if args.true_size:
+        if not args.compact:
+            logger.warning("--true-size 는 --compact 와 함께 써야 합니다. 무시합니다.")
+        else:
+            from app.hardware.board import DEVICE_DIAGONAL_INCHES
+            from app.ui.true_size import describe, scale_for_screen
+
+            true_size_scale = scale_for_screen(
+                qt_app.primaryScreen(),
+                device_width_px=profile.window_width,
+                device_height_px=profile.window_height,
+                device_diagonal_inches=DEVICE_DIAGONAL_INCHES,
+            )
+            logger.info(
+                "%s",
+                describe(
+                    true_size_scale,
+                    profile.window_width,
+                    profile.window_height,
+                    DEVICE_DIAGONAL_INCHES,
+                ),
+            )
+
     window = DeckWindow(
         controller,
         poller,
         wave_source=wave_source,
         layout=profile,
         lock_layout=args.compact,
+        true_size_scale=true_size_scale,
     )
 
     # --- 입력 장치 ---

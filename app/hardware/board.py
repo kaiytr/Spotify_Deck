@@ -89,6 +89,11 @@ SPECS: dict[str, Spec] = {
 SCREEN_WIDTH = 480
 SCREEN_HEIGHT = 320
 
+#: 패널 대각 길이(인치). 리스팅에 명시된 값.
+#: 실물 크기 미리보기(--true-size)의 기준이다.
+#: 480x320을 4인치에 담으면 144 PPI가 된다.
+DEVICE_DIAGONAL_INCHES = 4.0
+
 #: RGB565 풀 프레임버퍼 크기 = 480 * 320 * 2 = 307,200 바이트 (300KB)
 FULL_FRAMEBUFFER_BYTES = SCREEN_WIDTH * SCREEN_HEIGHT * 2
 

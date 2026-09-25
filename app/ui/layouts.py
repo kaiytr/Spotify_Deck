@@ -7,27 +7,37 @@ ESP32 UI를 만들 때 "PC에서는 어떤 크기였지?"를 이 파일 하나�
     COMPACT_480    ESP32 목표 해상도(480x320)의 기준 설계.
                    PC에서 `--compact` 로 띄워 실물 없이 확인할 수 있다.
 
-Compact는 "PC UI를 줄인 것"이 아니라 **별도 설계**다.
-480x320은 세로가 320px뿐이라 그냥 축소하면 아무것도 안 들어간다.
-무엇을 줄이고 무엇을 지킬지 명시적으로 정한다.
+두 프로파일은 **같은 세로 스택 구조**를 쓰고 치수만 다르다.
+구조가 하나면 ESP32로 옮길 때 "PC는 이렇게 생겼는데 기기는 왜 다르지?"가 없다.
 
 ────────────────────────────────────────────────────────────────
- 480x320 세로 예산 (총 320px)
+ 화면 구조 (Spotify Deck 기준 디자인)
 ────────────────────────────────────────────────────────────────
-   상단바 (연결 상태 / 기기)          22
-   본문 (앨범아트 + 정보 + 컨트롤)   238
-   하단 여백/안내                     24
-   상하 마진                          36
-   ─────────────────────────────────────
-                                     320
 
- 본문 238px 안에서 가로로 나눈다:
-   왼쪽  앨범 아트 정사각형 238x238
-   오른쪽 곡 정보 + 웨이브 + 진행바 + 버튼 2줄
+  ┌──────────────────────────────────────────────┐
+  │ ● 연결됨                    기기명 · 컴퓨터   │  상단바
+  │                                              │
+  │ ┌────────┐  Sunset Lover                     │
+  │ │        │  Petit Biscuit                    │  미디어 블록
+  │ │  ART   │  SUNSET LOVER                     │  (아트 + 정보 + 웨이브)
+  │ │        │  ▁▃▅▇▅▃▁▂▄▆▄▂                    │
+  │ └────────┘                                   │
+  │                                              │
+  │ ━━━━━━━━━━━●━━━━━━━━━━━━━━━━━━━━━━━━━━━━   │  진행 바 (전체 폭)
+  │ 1:42                                    3:58 │  시간
+  │                                              │
+  │    ♡    ⤨    ◀    ( ▶ )    ▶▶    ⟲        │  컨트롤 한 줄
+  │              🔊 ━━━━━━━━━                    │  볼륨
+  └──────────────────────────────────────────────┘
 
- 지킨 것: 앨범아트, 곡정보, 웨이브, 진행바, 시간, 이전/재생/다음,
-          셔플/반복/좋아요, 볼륨, 연결상태, 기기명  (전 기능 유지)
- 줄인 것: 폰트 크기, 여백, 버튼 지름, 웨이브 높이, 앨범명은 한 줄 말줄임
+ 핵심 결정:
+   * 앨범 아트를 **작게** 두고 곡 정보 옆에 붙인다.
+     크게 두면 480x320에서 화면의 절반을 먹어 나머지가 눌린다.
+   * 진행 바는 **전체 폭**을 쓴다. 터치로 잡기 쉽고 시각적 기준선이 된다.
+   * 컨트롤 6개를 **한 줄에 균등 배치**한다.
+     두 줄로 나누면 세로를 더 먹고 시선이 흩어진다.
+   * 볼륨은 별도 줄. 기준 디자인은 '⋯' 메뉴 뒤에 숨기지만
+     이 앱에는 메뉴가 없고 볼륨이 필수 기능이므로 드러낸다.
 """
 
 from __future__ import annotations
@@ -103,6 +113,48 @@ class LayoutProfile:
     가운데에 두면 오른쪽 곡 정보보다 아래로 처져 보인다.
     """
 
+    art_size: int = 0
+    """앨범 아트 한 변 (논리 픽셀). 0이면 열 비율에서 계산한다(구형 2열 배치)."""
+
+    show_volume: bool = True
+    """볼륨 아이콘과 슬라이더를 화면에 표시할지.
+
+    기기 버전에서는 끈다. 로터리 엔코더가 볼륨을 담당하므로 화면에
+    슬라이더를 둘 이유가 없고, 그만큼 앨범 아트를 키울 수 있다.
+    PC에는 엔코더가 없어 마우스로 조절할 수단이 필요하므로 켠다.
+    (어느 쪽이든 위/아래 방향키는 항상 동작한다)
+    """
+
+    toggles_under_art: bool = False
+    """셔플·반복·좋아요를 앨범 아트 **아래**에 놓을지.
+
+    좁은 화면에서는 오른쪽 패널의 마지막 줄에 토글 3개와 볼륨을 함께 넣으면
+    토글이 왼쪽 끝, 볼륨이 오른쪽 끝으로 밀려 시선이 멀어진다.
+    아트가 정사각형이라 아래에 남는 공간이 생기므로 거기로 옮기면
+    빈 공간도 쓰고 버튼도 화면 가운데 가까이 온다.
+    """
+
+    @property
+    def art_edge(self) -> int:
+        """앨범 아트 한 변의 길이 (논리 픽셀). 아트는 정사각형이다."""
+        if self.art_size:
+            return self.art_size
+        # 구형 2열 배치용 폴백 (열 비율에서 계산)
+        body = self.window_width - self.margin_h * 2 - self.column_gap
+        return body * self.art_stretch // (self.art_stretch + self.panel_stretch)
+
+    @property
+    def control_row_width(self) -> int:
+        """컨트롤 줄 7개가 차지하는 폭.
+
+        좋아요 · 셔플 · 이전 · 재생 · 다음 · 반복 · 더보기
+        """
+        return (
+            self.toggle_button * 4      # 좋아요, 셔플, 반복, 더보기
+            + self.skip_button * 2      # 이전, 다음
+            + self.play_button          # 재생
+        )
+
     @property
     def aspect(self) -> float:
         return self.window_width / self.window_height
@@ -130,7 +182,7 @@ DESKTOP = LayoutProfile(
     skip_button=44,
     toggle_button=36,
     volume_icon=30,
-    volume_width=150,
+    volume_width=260,
     seek_height=22,
     seek_track=5.0,
     seek_handle=7.0,
@@ -138,6 +190,7 @@ DESKTOP = LayoutProfile(
     wave_fps=60,
     art_stretch=5,
     panel_stretch=6,
+    art_size=260,
     show_album_line=True,
     show_key_hints=True,
     touch_targets=False,
@@ -166,7 +219,7 @@ DESKTOP_NARROW = LayoutProfile(
     skip_button=40,
     toggle_button=34,
     volume_icon=28,
-    volume_width=120,
+    volume_width=200,
     seek_height=20,
     seek_track=5.0,
     seek_handle=7.0,
@@ -174,8 +227,7 @@ DESKTOP_NARROW = LayoutProfile(
     wave_fps=60,
     art_stretch=4,
     panel_stretch=5,
-    # 세로 배치에서도 아트가 아래로 처지지 않게 살짝 위로.
-    art_vertical_bias=0.3,
+    art_size=150,
     show_album_line=True,
     show_key_hints=True,
     touch_targets=False,
@@ -212,19 +264,23 @@ COMPACT_480 = LayoutProfile(
     margin_v=10,
     column_gap=14,
     section_gap=8,
-    title_pt=15,
-    artist_pt=11,
-    album_pt=9,
-    meta_pt=9,
+    # 재생 버튼만 48px를 유지하고 나머지는 키웠다.
+    # 4인치 실물 기준 터치 크기:
+    #   재생 48px = 8.5mm, 이전/다음 42px = 7.4mm (권장 7~9mm 충족)
+    #   토글 38px = 6.7mm — 아직 살짝 작지만 간격 41px로 오조작은 적다
+    title_pt=17,
+    artist_pt=13,
+    album_pt=11,
+    meta_pt=11,
     play_button=48,
-    skip_button=34,
-    toggle_button=30,
-    volume_icon=24,
-    volume_width=92,
-    seek_height=16,
-    seek_track=4.0,
-    seek_handle=6.0,
-    wave_height=28,
+    skip_button=42,
+    toggle_button=38,
+    volume_icon=28,
+    volume_width=170,
+    seek_height=20,
+    seek_track=6.0,
+    seek_handle=8.0,
+    wave_height=34,
     wave_fps=30,
     # 2:3 = 앨범 아트 175px / 정보 패널 263px.
     #
@@ -234,12 +290,14 @@ COMPACT_480 = LayoutProfile(
     # 2:3이면 263px라 27px 여유가 남는다.
     art_stretch=2,
     panel_stretch=3,
-    # 아트는 175x175인데 영역 세로는 약 238px이라 63px이 남는다.
-    # 가운데(0.5)에 두면 위아래 31px씩 떠서 오른쪽 곡 제목보다
-    # 아트가 아래로 처져 보인다. 0.15면 위쪽 여백이 약 9px로 줄어
-    # 곡 정보와 눈높이가 맞는다.
-    art_vertical_bias=0.15,
-    show_album_line=False,
+    # 볼륨 줄을 빼서 생긴 세로 공간을 앨범 아트에 돌려준다.
+    #   세로 예산: 마진20 + 상단바20 + 간격8 + 아트 + 간격8
+    #             + 진행바·시간28 + 간격8 + 컨트롤48  =  140 + 아트
+    #   320 - 140 = 180 까지 가능하지만 20px 여유를 남긴다.
+    art_size=160,
+    # 기기에는 로터리 엔코더가 있으므로 화면 볼륨 슬라이더를 뺀다.
+    show_volume=False,
+    show_album_line=True,
     show_key_hints=False,
     touch_targets=True,
 )

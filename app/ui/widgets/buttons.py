@@ -179,6 +179,45 @@ class IconButton(QWidget):
         return QSize(self._base_size, self._base_size)
 
 
+class IconLabel(QWidget):
+    """클릭할 수 없는 아이콘 표시용 위젯.
+
+    로고처럼 '보여주기만' 하는 자리에 쓴다.
+    IconButton을 쓰면 커서가 손가락으로 바뀌고 호버 효과가 생겨
+    누를 수 있는 것처럼 오해하게 된다.
+    """
+
+    def __init__(
+        self,
+        icon: Icon,
+        *,
+        size: int = 24,
+        color: str = Colors.ACCENT,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._icon = icon
+        self._color = QColor(color)
+        self.setFixedSize(size, size)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+
+    def set_color(self, color: QColor) -> None:
+        if color.rgb() != self._color.rgb():
+            self._color = QColor(color)
+            self.update()
+
+    def set_icon(self, icon: Icon) -> None:
+        if self._icon is not icon:
+            self._icon = icon
+            self.update()
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        draw_icon(painter, self._icon, QRectF(self.rect()), self._color)
+        painter.end()
+
+
 class PlayButton(IconButton):
     """가운데 재생/일시정지 버튼.
 

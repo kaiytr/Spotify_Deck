@@ -4,9 +4,8 @@
 
 시각 설계:
   * 아래에서 위로 자라는 막대 + 바닥에 은은한 반사
-  * 저음(왼쪽)은 Spotify 그린, 고음(오른쪽)으로 갈수록 밝게 — 대역이 눈에 구분된다
-  * 막대 끝에 '피크 홀드' 점이 잠깐 머물다 떨어진다 (실제 오디오 기기 느낌)
-  * 화면 폭에 맞춰 막대 개수를 자동으로 줄인다 (3.5인치 LCD 대응)
+  * 세로 그라디언트 (아래 진한 색 -> 위 밝은 색), 앨범 강조색 기반
+  * 화면 폭에 맞춰 막대 개수를 자동으로 줄인다 (소형 LCD 대응)
 
 성능:
   60fps로 다시 그리므로 paintEvent가 무거우면 안 된다.
@@ -65,7 +64,7 @@ class WaveBarWidget(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
 
         self._gradient_cache: QLinearGradient | None = None
-        self._cached_height = -1
+        self._cached_height = -1.0
         self._accent = AccentPalette.default()
 
         self._timer = QTimer(self)
@@ -157,7 +156,7 @@ class WaveBarWidget(QWidget):
         return self._gradient_cache
 
     def paintEvent(self, event) -> None:  # noqa: N802
-        levels, peaks = self._bar_values()
+        levels, _peaks = self._bar_values()
         count = len(levels)
         if count == 0:
             return
@@ -169,7 +168,7 @@ class WaveBarWidget(QWidget):
         w = self.width()
         h = self.height()
 
-        # 막대 영역은 위 80%, 아래 20%는 반사용
+        # 막대 영역은 위 78%, 아래 22%는 반사용
         bar_area = h * 0.78
         baseline = bar_area
         reflection_h = h - bar_area
@@ -188,8 +187,9 @@ class WaveBarWidget(QWidget):
 
             # 아주 작은 값도 1px 씨앗을 남겨 바닥선이 보이게 한다.
             bar_h = max(1.5, level * bar_area)
-            rect = QRectF(x, baseline - bar_h, bar_w, bar_h)
-            painter.drawRoundedRect(rect, radius, radius)
+            painter.drawRoundedRect(
+                QRectF(x, baseline - bar_h, bar_w, bar_h), radius, radius
+            )
 
             # 바닥 반사 — 같은 막대를 뒤집어 흐리게 그린다.
             if reflection_h > 2 and level > 0.02:

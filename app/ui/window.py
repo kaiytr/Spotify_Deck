@@ -1,26 +1,33 @@
 """메인 윈도우.
 
-레이아웃 전략 — "16:9 데스크톱 최적화 + 3.5~5인치 LCD 축소 대응":
+Spotify Deck 기준 디자인의 **세로 스택** 구조를 따른다.
+PC와 480x320 기기가 같은 구조를 쓰고 치수만 달라진다.
 
-    넓을 때 (16:9 데스크톱, 800x480 LCD)      좁을 때 (세로 화면)
-    ┌────────────┬──────────────────┐        ┌──────────────┐
-    │            │  Song Title      │        │  [앨범아트]   │
-    │  [앨범아트] │  Artist / Album  │        ├──────────────┤
-    │            │  ──────●───────  │        │  Song Title  │
-    │            │  [◀] [▶] [▶▶]   │        │  ──●───────  │
-    │            │  [S] [R] [♥] 🔊  │        │  [◀][▶][▶▶] │
-    └────────────┴──────────────────┘        └──────────────┘
+    ┌──────────────────────────────────────────────┐
+    │ ● 연결됨                    기기명 · 컴퓨터   │  상단바
+    │ ┌────────┐  Song Title                       │
+    │ │  ART   │  Artist                           │  미디어 블록
+    │ │        │  ALBUM                            │
+    │ └────────┘  ▁▃▅▇▅▃▁▂▄▆                      │
+    │ ━━━━━━━━━━━●━━━━━━━━━━━━━━━━━━━━━━━━━━━━   │  진행 바 (전체 폭)
+    │ 1:42                                    3:58 │
+    │    ♡    ⤨    ◀    ( ▶ )    ▶▶    ⟲        │  컨트롤 한 줄
+    │              🔊 ━━━━━━━━━                    │  볼륨
+    └──────────────────────────────────────────────┘
 
-창 너비가 임계값을 넘나들 때 자동으로 전환된다.
-RK3399에 5인치 800x480 LCD를 붙이면 가로 배치가 그대로 쓰인다.
+2열로 나누지 않는 이유: 앨범 아트를 한쪽 열에 세로로 꽉 채우면
+480x320에서 화면 절반을 먹고 나머지가 눌린다. 아트를 작게 두고
+위에서 아래로 쌓으면 진행 바와 컨트롤이 전체 폭을 쓸 수 있다.
+
+치수는 모두 app/ui/layouts.py 의 LayoutProfile 에서 나온다.
 """
 
 from __future__ import annotations
 
 import logging
 
-from PySide6.QtCore import Qt, QThreadPool, QTimer, Signal
-from PySide6.QtGui import QCloseEvent, QFont, QResizeEvent
+from PySide6.QtCore import QPoint, Qt, QThreadPool, QTimer, Signal
+from PySide6.QtGui import QCloseEvent, QColor, QFont, QPainter, QResizeEvent
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -42,7 +49,7 @@ from app.ui.layouts import DESKTOP, LayoutProfile, profile_for_width
 from app.ui.palette import AccentPalette
 from app.ui.theme import Colors, build_stylesheet
 from app.ui.widgets.album_art import AlbumArtWidget
-from app.ui.widgets.buttons import IconButton, PlayButton
+from app.ui.widgets.buttons import IconButton, IconLabel, PlayButton
 from app.ui.widgets.slider import ProgressSlider
 from app.ui.widgets.wave_bar import WaveBarWidget
 from app.ui.worker import ActionRunner, PollWorker
@@ -66,6 +73,7 @@ class DeckWindow(QMainWindow):
         wave_source=None,
         layout: LayoutProfile | None = None,
         lock_layout: bool = False,
+        true_size_scale: float | None = None,
         parent: QWidget | None = None,
     ) -> None:
         """
@@ -98,14 +106,32 @@ class DeckWindow(QMainWindow):
         self._running_actions: set[ActionRunner] = set()
         #: 현재 앨범에서 뽑은 강조색
         self._accent = AccentPalette.default()
+        #: --compact 일 때 기기 화면 크기로 고정된 프레임 (없으면 None)
+        self._device_frame: QWidget | None = None
+        #: 실물 크기 보정 배율 (--true-size). None이면 보정 없음.
+        self._true_size_scale = true_size_scale
 
         profile = self._layout
         self.setWindowTitle("Spotify Deck")
-        self.setMinimumSize(profile.min_width, profile.min_height)
-        self.resize(profile.window_width, profile.window_height)
+
         if lock_layout:
-            # ESP32 화면 흉내 - 크기를 고정해 실제 기기와 같은 조건으로 본다.
-            self.setFixedSize(profile.window_width, profile.window_height)
+            # 창은 화면에 그려질 기기 크기에 맞춘다.
+            #
+            # --true-size 면 내용물이 축소되므로 창도 그만큼 작아야 한다.
+            # 창을 480x320으로 두면 축소된 355x237 내용 주위에 검은 여백이
+            # 생겨서 "어디까지가 실제 4인치인지" 헷갈린다.
+            #
+            # 창 자체를 setFixedSize로 묶지는 않는다. --fullscreen이
+            # 강제로 창을 늘릴 때 충돌하기 때문이다. 대신 내부 프레임을
+            # 고정해 두었으므로 전체화면에서는 검은 배경 가운데에
+            # 기기 화면이 실제 크기로 놓인다.
+            width, height = self.rendered_device_size()
+            self.setMinimumSize(width, height)
+            self.resize(width, height)
+        else:
+            self.setMinimumSize(profile.min_width, profile.min_height)
+            self.resize(profile.window_width, profile.window_height)
+
         self.setStyleSheet(build_stylesheet())
 
         self._build_ui()
@@ -125,72 +151,90 @@ class DeckWindow(QMainWindow):
     # -- UI 구성 -------------------------------------------------------------
 
     def _build_ui(self) -> None:
+        """세로 스택 구조로 화면을 만든다.
+
+            상단바
+            미디어 블록 (앨범아트 | 제목·아티스트·앨범·웨이브)
+            진행 바 (전체 폭)
+            시간 (좌: 경과 / 우: 전체)
+            컨트롤 한 줄 (♡ ⤨ ◀ ▶ ▶▶ ⟲)
+            볼륨
+            [단축키 안내 - 데스크톱만]
+
+        2열로 나누지 않는 이유: 앨범 아트를 한쪽 열에 세로로 꽉 채우면
+        480x320에서 화면 절반을 먹고 나머지가 눌린다. 아트를 작게 두고
+        위에서 아래로 쌓으면 진행 바와 컨트롤이 전체 폭을 쓸 수 있다.
+        """
         central = QWidget()
         self.setCentralWidget(central)
 
         profile = self._layout
+        host = self._make_device_frame(central, profile)
 
-        root = QVBoxLayout(central)
+        root = QVBoxLayout(host)
         root.setContentsMargins(
             profile.margin_h, profile.margin_v, profile.margin_h, profile.margin_v
         )
-        root.setSpacing(profile.section_gap)
+        root.setSpacing(0)
 
         root.addWidget(self._build_header())
+        root.addSpacing(profile.section_gap)
 
-        # 앨범 아트 + 정보/컨트롤을 담는 가변 영역
-        self._body = QHBoxLayout()
-        self._body.setSpacing(profile.column_gap)
+        # 미디어 블록은 stretch 0 — 앨범 아트 높이만큼만 차지한다.
+        # stretch 1을 주면 남는 세로를 전부 흡수해 웨이브와 진행 바 사이에
+        # 빈 공간이 크게 벌어진다.
+        root.addWidget(self._build_media_block(profile), 0)
+        root.addSpacing(profile.section_gap)
 
-        self._album_art = AlbumArtWidget(
-            radius=14 if profile is DESKTOP else 10,
-            vertical_bias=profile.art_vertical_bias,
-        )
-        self._body.addWidget(self._album_art, profile.art_stretch)
+        # 남는 세로를 진행 바 위 1 : 아래 2 로 나눈다.
+        #
+        # 전부 아래로 몰면 진행 바가 앨범 아트에 바짝 붙어 답답하다.
+        # 위쪽에도 일부를 줘서 아트와 거리를 두고, 그래도 아래를 더 크게 둬
+        # 컨트롤은 화면 아래쪽에 머무르게 한다.
+        root.addStretch(1)
+        root.addWidget(self._build_progress(profile))
+        root.addStretch(2)
 
-        self._panel = self._build_panel()
-        self._body.addWidget(self._panel, profile.panel_stretch)
+        root.addWidget(self._build_controls(profile))
 
-        root.addLayout(self._body, 1)
+        # 볼륨 줄. 기기 버전에서는 로터리 엔코더가 담당하므로 화면에서 뺀다.
+        # 위젯 자체는 만들어 둔다 — 상태 반영 코드가 참조하고,
+        # 방향키로 볼륨을 바꿀 때 값이 갱신되어야 하기 때문이다.
+        self._volume_row = self._build_volume(profile)
+        if profile.show_volume:
+            root.addSpacing(max(4, profile.section_gap - 4))
+            root.addWidget(self._volume_row)
+        else:
+            self._volume_row.hide()
 
         self._footer = self._build_footer()
-        root.addWidget(self._footer)
-        # 작은 화면에는 키보드가 없다. 하단 안내를 숨겨 세로 공간을 돌려준다.
+        if profile.show_key_hints:
+            root.addSpacing(profile.section_gap)
+            root.addWidget(self._footer)
         self._footer.setVisible(profile.show_key_hints)
 
-    def _build_header(self) -> QWidget:
-        """상단: 연결 상태 + 기기 이름."""
-        header = QWidget()
-        layout = QHBoxLayout(header)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(10)
+    # -- 구성 요소 -----------------------------------------------------------
 
-        self._status_dot = QLabel("●")
-        self._status_dot.setStyleSheet(f"color: {Colors.TEXT_MUTED}; font-size: 13px;")
+    def _build_media_block(self, profile: LayoutProfile) -> QWidget:
+        """앨범 아트 + 곡 정보 + 웨이브.
 
-        self._status_label = QLabel("연결 중...")
-        self._status_label.setStyleSheet(f"color: {Colors.TEXT_DIM}; font-size: 12px;")
+        아트는 고정 정사각형이고, 오른쪽에 텍스트와 웨이브가 쌓인다.
+        """
+        block = QWidget()
+        row = QHBoxLayout(block)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(profile.column_gap)
 
-        self._device_label = QLabel("")
-        self._device_label.setStyleSheet(f"color: {Colors.TEXT_MUTED}; font-size: 12px;")
+        edge = profile.art_edge
+        self._album_art = AlbumArtWidget(radius=10 if edge < 200 else 14)
+        self._album_art.setFixedSize(edge, edge)
+        row.addWidget(self._album_art, 0, Qt.AlignmentFlag.AlignTop)
 
-        layout.addWidget(self._status_dot)
-        layout.addWidget(self._status_label)
-        layout.addStretch(1)
-        layout.addWidget(self._device_label)
-        return header
+        info = QWidget()
+        col = QVBoxLayout(info)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(0)
 
-    def _build_panel(self) -> QWidget:
-        """오른쪽(또는 아래쪽): 곡 정보 + 진행률 + 컨트롤."""
-        profile = self._layout
-        panel = QWidget()
-        layout = QVBoxLayout(panel)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-
-        layout.addStretch(1)
-
-        # --- 곡 정보 ---
         self._title_label = QLabel("재생 중인 음악이 없습니다")
         title_font = QFont()
         title_font.setPointSize(profile.title_pt)
@@ -203,6 +247,9 @@ class DeckWindow(QMainWindow):
         artist_font = QFont()
         artist_font.setPointSize(profile.artist_pt)
         self._artist_label.setFont(artist_font)
+        # 줄바꿈을 켜야 한다. 끄면 폭을 넘는 글자가 소리 없이 잘려
+        # "...여기에 표시됩" 처럼 문장이 끊긴다.
+        # 아티스트 이름이 긴 경우에도 같은 문제가 생긴다.
         self._artist_label.setWordWrap(True)
         self._artist_label.setStyleSheet(f"color: {Colors.TEXT_DIM};")
 
@@ -210,49 +257,74 @@ class DeckWindow(QMainWindow):
         self._album_label.setStyleSheet(
             f"color: {Colors.TEXT_MUTED}; font-size: {profile.album_pt + 2}px;"
         )
-        self._album_label.setWordWrap(True)
-        # 480x320은 세로가 빠듯해 앨범명 줄을 뺀다 (제목/아티스트가 우선).
         self._album_label.setVisible(profile.show_album_line)
 
-        layout.addWidget(self._title_label)
-        layout.addSpacing(4 if profile.show_album_line else 3)
-        layout.addWidget(self._artist_label)
+        col.addWidget(self._title_label)
+        col.addSpacing(2)
+        col.addWidget(self._artist_label)
         if profile.show_album_line:
-            layout.addSpacing(3)
-            layout.addWidget(self._album_label)
-        layout.addSpacing(profile.section_gap + 6)
+            col.addSpacing(1)
+            col.addWidget(self._album_label)
 
-        # --- 웨이브 바 (스펙트럼) ---
-        # 곡 정보와 진행 바 사이에 둔다. 재생 중임을 한눈에 보여 주는 자리다.
+        # 웨이브는 곡 정보와 아트 아래쪽 사이에 둔다.
+        #
+        # 위쪽 stretch 1 : 아래쪽 stretch 2 로 나눠 남는 공간의 약 1/3 지점에
+        # 놓는다. 텍스트에 딱 붙이면 답답하고, stretch를 아래에만 주면
+        # 아트 바닥까지 밀려 내려가 텍스트와 사이가 크게 벌어진다.
         if self._wave is not None:
-            layout.addWidget(self._wave)
-            layout.addSpacing(profile.section_gap)
+            col.addStretch(1)
+            col.addWidget(self._wave)
+            col.addStretch(2)
         else:
-            layout.addSpacing(profile.section_gap // 2)
+            col.addStretch(1)
 
-        # --- 진행률 ---
+        row.addWidget(info, 1)
+        return block
+
+    def _build_progress(self, profile: LayoutProfile) -> QWidget:
+        """진행 바 + 시간. 전체 폭을 쓴다."""
+        wrapper = QWidget()
+        col = QVBoxLayout(wrapper)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(0)
+
         self._seek = ProgressSlider(
             height=profile.seek_height,
             track_height=profile.seek_track,
             handle_radius=profile.seek_handle,
-            # 터치 기기는 호버가 없어 핸들이 안 보이면 잡을 수가 없다.
+            # 터치 기기는 호버가 없어 핸들이 숨으면 잡을 수가 없다.
             always_show_handle=profile.touch_targets,
         )
-        layout.addWidget(self._seek)
+        col.addWidget(self._seek)
 
-        time_row = QHBoxLayout()
-        time_row.setContentsMargins(0, 2, 0, 0)
+        times = QHBoxLayout()
+        times.setContentsMargins(0, 0, 0, 0)
         self._elapsed_label = QLabel("--:--")
         self._duration_label = QLabel("--:--")
-        for lbl in (self._elapsed_label, self._duration_label):
-            lbl.setStyleSheet(f"color: {Colors.TEXT_DIM}; font-size: {profile.meta_pt}px;")
-        time_row.addWidget(self._elapsed_label)
-        time_row.addStretch(1)
-        time_row.addWidget(self._duration_label)
-        layout.addLayout(time_row)
-        layout.addSpacing(18)
+        for label in (self._elapsed_label, self._duration_label):
+            label.setStyleSheet(
+                f"color: {Colors.TEXT_DIM}; font-size: {profile.meta_pt + 1}px;"
+            )
+        times.addWidget(self._elapsed_label)
+        times.addStretch(1)
+        times.addWidget(self._duration_label)
+        col.addLayout(times)
 
-        # --- 주 컨트롤 ---
+        return wrapper
+
+    def _build_controls(self, profile: LayoutProfile) -> QWidget:
+        """컨트롤 한 줄: 좋아요 · 셔플 · 이전 · 재생 · 다음 · 반복.
+
+        기준 디자인처럼 전체 폭에 균등 배치한다.
+        두 줄로 나누면 세로를 더 먹고 시선이 흩어진다.
+        """
+        self._like_btn = IconButton(
+            Icon.HEART, size=profile.toggle_button,
+            active_color=Colors.LIKE, tooltip="좋아요  (L)",
+        )
+        self._shuffle_btn = IconButton(
+            Icon.SHUFFLE, size=profile.toggle_button, tooltip="셔플  (S)"
+        )
         self._prev_btn = IconButton(
             Icon.PREVIOUS, size=profile.skip_button, tooltip="이전 곡  (←)"
         )
@@ -260,50 +332,203 @@ class DeckWindow(QMainWindow):
         self._next_btn = IconButton(
             Icon.NEXT, size=profile.skip_button, tooltip="다음 곡  (→)"
         )
-
-        main_row = QHBoxLayout()
-        main_row.setSpacing(profile.column_gap + 4)
-        main_row.addStretch(1)
-        main_row.addWidget(self._prev_btn)
-        main_row.addWidget(self._play_btn)
-        main_row.addWidget(self._next_btn)
-        main_row.addStretch(1)
-        layout.addLayout(main_row)
-        layout.addSpacing(profile.section_gap + 4)
-
-        # --- 보조 컨트롤 + 볼륨 ---
-        toggle = profile.toggle_button
-        self._shuffle_btn = IconButton(Icon.SHUFFLE, size=toggle, tooltip="셔플  (S)")
-        self._repeat_btn = IconButton(Icon.REPEAT, size=toggle, tooltip="반복  (R)")
-        self._like_btn = IconButton(
-            Icon.HEART, size=toggle, active_color=Colors.LIKE, tooltip="좋아요  (L)"
+        self._repeat_btn = IconButton(
+            Icon.REPEAT, size=profile.toggle_button, tooltip="반복  (R)"
         )
-        self._volume_icon = IconButton(
-            Icon.VOLUME, size=profile.volume_icon, icon_ratio=0.62, tooltip="음소거 / 해제"
+        self._more_btn = IconButton(
+            Icon.MORE, size=profile.toggle_button, tooltip="더보기"
         )
 
-        self._volume = ProgressSlider(height=18, track_height=4, handle_radius=6)
-        self._volume.set_range(100)
-        # 고정 폭으로 둔다.
+        bar = QWidget()
+        row = QHBoxLayout(bar)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(0)
+
+        # 줄 **양 끝에는 stretch를 넣지 않는다.**
         #
-        # setMaximumWidth만 주면 화면에서 사라진다.
-        # 같은 줄의 addStretch(1)이 stretch 1이고 슬라이더는 0이라
-        # 남는 공간을 스페이서가 전부 가져가고, 슬라이더는 sizeHint(0px)로
-        # 찌그러진다. 실제로 이 버그로 볼륨 바가 보이지 않았다.
+        # 넣으면 버튼 전체가 안쪽으로 밀려 왼쪽에 빈 공간이 생기고,
+        # 화면이 오른쪽으로 치우쳐 보인다.
+        # 첫 버튼은 왼쪽 여백에, 마지막 버튼은 오른쪽 여백에 붙이고
+        # 사이만 균등하게 벌린다 (기준 디자인과 같은 배치).
+        buttons = (
+            self._like_btn,
+            self._shuffle_btn,
+            self._prev_btn,
+            self._play_btn,
+            self._next_btn,
+            self._repeat_btn,
+            self._more_btn,
+        )
+        for index, button in enumerate(buttons):
+            if index:
+                row.addStretch(1)
+            row.addWidget(button, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        return bar
+
+    def _build_volume(self, profile: LayoutProfile) -> QWidget:
+        """볼륨 줄.
+
+        기준 디자인은 볼륨을 '⋯' 메뉴 뒤에 숨기지만 이 앱에는 메뉴가 없고
+        볼륨은 필수 기능이라 별도 줄로 드러낸다.
+        """
+        self._volume_icon = IconButton(
+            Icon.VOLUME, size=profile.volume_icon, icon_ratio=0.62,
+            tooltip="음소거 / 해제",
+        )
+        self._volume = ProgressSlider(
+            height=max(14, profile.seek_height - 2),
+            track_height=profile.seek_track - 1,
+            handle_radius=profile.seek_handle - 1,
+            always_show_handle=profile.touch_targets,
+        )
+        self._volume.set_range(100)
+        # 고정 폭으로 둔다. setMaximumWidth만 주면 같은 줄의 스트레치가
+        # 남는 공간을 전부 가져가 슬라이더가 0px로 찌그러진다.
         self._volume.setFixedWidth(profile.volume_width)
 
-        sub_row = QHBoxLayout()
-        sub_row.setSpacing(6 if profile.touch_targets else 8)
-        sub_row.addWidget(self._shuffle_btn)
-        sub_row.addWidget(self._repeat_btn)
-        sub_row.addWidget(self._like_btn)
-        sub_row.addStretch(1)
-        sub_row.addWidget(self._volume_icon)
-        sub_row.addWidget(self._volume)
-        layout.addLayout(sub_row)
+        bar = QWidget()
+        row = QHBoxLayout(bar)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(8)
+        row.addStretch(1)
+        row.addWidget(self._volume_icon)
+        row.addWidget(self._volume)
+        row.addStretch(1)
+        return bar
 
+    def rendered_device_size(self) -> tuple[int, int]:
+        """기기 화면이 실제로 그려지는 크기 (논리 픽셀).
+
+        --true-size 배율이 걸리면 축소된 크기를, 아니면 프로파일 크기를
+        돌려준다. 창 크기를 여기에 맞춰야 검은 여백 없이
+        "창 = 기기 화면"이 되어 실물 크기를 자로 잴 수 있다.
+        """
+        profile = self._layout
+        scale = self._true_size_scale
+
+        if scale is None or abs(scale - 1.0) <= 0.01:
+            return profile.window_width, profile.window_height
+
+        # +1은 QGraphicsView가 경계에서 1px을 잘라먹지 않게 하는 여유다.
+        return (
+            round(profile.window_width * scale) + 1,
+            round(profile.window_height * scale) + 1,
+        )
+
+    def _make_device_frame(self, central: QWidget, profile: LayoutProfile) -> QWidget:
+        """실제 UI를 담을 위젯을 돌려준다.
+
+        고정 레이아웃(--compact)이면 기기 화면 크기로 고정한 프레임을
+        가운데에 놓고 그 안에 UI를 만든다. 그러면 창이 커져도
+        (전체화면 포함) 기기 화면은 480x320 실제 크기를 유지한다.
+
+        실물 크기 배율(--true-size)이 있으면 그 프레임을 QGraphicsView에
+        넣어 축소한다. **레이아웃은 480x320 그대로 두고 그려진 결과만
+        줄이는 것**이 핵심이다. 창을 354x236으로 줄이면 폰트와 버튼이
+        다시 배치되어 실제 기기와 다른 화면이 되어 버린다.
+
+        일반 PC 모드에서는 그냥 central을 쓴다 — 기존 동작 그대로다.
+        """
+        if self._locked_layout is None:
+            return central
+
+        outer = QVBoxLayout(central)
+        outer.setContentsMargins(0, 0, 0, 0)
+
+        frame = QWidget()
+        frame.setFixedSize(profile.window_width, profile.window_height)
+        # 그래픽 씬에 들어가면 부모 스타일시트를 못 물려받아 배경이 비어 보인다.
+        frame.setAutoFillBackground(True)
+        frame.setStyleSheet(f"background-color: {Colors.BG};")
+
+        centered: QWidget = frame
+        scale = self._true_size_scale
+
+        if scale is not None and abs(scale - 1.0) > 0.01:
+            centered = self._wrap_in_scaled_view(frame, profile, scale)
+
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.addStretch(1)
+        row.addWidget(centered)
+        row.addStretch(1)
+
+        outer.addStretch(1)
+        outer.addLayout(row)
+        outer.addStretch(1)
+
+        self._device_frame = frame
+        return frame
+
+    def _wrap_in_scaled_view(
+        self, frame: QWidget, profile: LayoutProfile, scale: float
+    ) -> QWidget:
+        """프레임을 QGraphicsView에 넣어 배율을 적용한다.
+
+        QGraphicsProxyWidget은 마우스·키보드 이벤트의 좌표를 역변환해
+        전달하므로, 축소해도 버튼 클릭과 슬라이더 드래그가 정상 동작한다.
+        """
+        from PySide6.QtWidgets import QFrame, QGraphicsScene, QGraphicsView
+
+        scene = QGraphicsScene(self)
+        scene.setBackgroundBrush(QColor(Colors.BG))
+        scene.addWidget(frame)
+
+        view = QGraphicsView(scene)
+        view.setTransform(view.transform().scale(scale, scale))
+        view.setFrameShape(QFrame.Shape.NoFrame)
+        view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        view.setRenderHints(
+            QPainter.RenderHint.Antialiasing
+            | QPainter.RenderHint.SmoothPixmapTransform
+            | QPainter.RenderHint.TextAntialiasing
+        )
+        view.setStyleSheet("border: none;")
+        # 뷰 크기를 축소된 크기에 정확히 맞춰 여백이나 스크롤이 생기지 않게 한다.
+        view.setFixedSize(*self.rendered_device_size())
+        view.setSceneRect(0, 0, profile.window_width, profile.window_height)
+
+        logger.debug("실물 크기 뷰: 배율 %.3f", scale)
+        return view
+
+    def _build_header(self) -> QWidget:
+        """상단: 연결 상태 + 기기 이름.
+
+        글자 크기는 프로파일을 따른다. 고정값으로 박아 두면
+        다른 요소를 키울 때 상단바만 작게 남아 어색해진다.
+        """
+        size = self._layout.meta_pt + 2
+
+        header = QWidget()
+        layout = QHBoxLayout(header)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+
+        # Spotify 마크가 연결 상태를 겸한다.
+        #   연결됨   -> 앨범 강조색 (곡이 바뀌면 함께 물든다)
+        #   끊김     -> 빨강
+        # 평소에는 글자 없이 마크만 두고, 문제가 생겼을 때만 설명을 띄운다.
+        self._logo = IconLabel(
+            Icon.SPOTIFY, size=self._layout.meta_pt + 12, color=Colors.TEXT_MUTED
+        )
+
+        self._status_label = QLabel("연결 중...")
+        self._status_label.setStyleSheet(
+            f"color: {Colors.TEXT_DIM}; font-size: {size}px;"
+        )
+
+        self._device_label = QLabel("")
+        self._device_label.setStyleSheet(
+            f"color: {Colors.TEXT_MUTED}; font-size: {size}px;"
+        )
+
+        layout.addWidget(self._logo)
+        layout.addWidget(self._status_label)
         layout.addStretch(1)
-        return panel
+        layout.addWidget(self._device_label)
+        return header
 
     def _build_footer(self) -> QWidget:
         """하단: 상태 배너(오류/안내) + 단축키 힌트."""
@@ -346,6 +571,7 @@ class DeckWindow(QMainWindow):
         self._repeat_btn.clicked.connect(lambda: self._dispatch(DeckAction.TOGGLE_REPEAT))
         self._like_btn.clicked.connect(lambda: self._dispatch(DeckAction.TOGGLE_LIKE))
         self._volume_icon.clicked.connect(self._toggle_mute)
+        self._more_btn.clicked.connect(self._show_more_menu)
 
         self._seek.seek_requested.connect(
             lambda ms: self._dispatch(DeckAction.SEEK_SET, position_ms=ms)
@@ -405,6 +631,43 @@ class DeckWindow(QMainWindow):
         elif result.error is not None:
             self._show_error(result.error)
 
+    def _show_more_menu(self) -> None:
+        """더보기 메뉴.
+
+        기기 버전에서는 볼륨 슬라이더를 화면에서 뺐으므로
+        음소거를 여기서 할 수 있게 한다.
+        """
+        from PySide6.QtWidgets import QMenu
+
+        menu = QMenu(self)
+        menu.setStyleSheet(
+            f"""
+            QMenu {{
+                background-color: {Colors.SURFACE};
+                color: {Colors.TEXT};
+                border: 1px solid {Colors.BORDER};
+                border-radius: 8px;
+                padding: 6px;
+            }}
+            QMenu::item {{ padding: 7px 18px; border-radius: 5px; }}
+            QMenu::item:selected {{ background-color: {Colors.SURFACE_HI}; }}
+            """
+        )
+
+        muted = self._state.volume == 0
+        menu.addAction("음소거 해제" if muted else "음소거", self._toggle_mute)
+        menu.addAction("볼륨 올리기", lambda: self._dispatch(DeckAction.VOLUME_UP))
+        menu.addAction("볼륨 내리기", lambda: self._dispatch(DeckAction.VOLUME_DOWN))
+        menu.addSeparator()
+        menu.addAction("새로고침", lambda: self._dispatch(DeckAction.REFRESH))
+        menu.addSeparator()
+        menu.addAction("종료", self.close)
+
+        # 버튼 위쪽에 띄운다. 아래는 화면 끝이라 잘린다.
+        corner = self._more_btn.mapToGlobal(self._more_btn.rect().topLeft())
+        menu.exec(corner - QPoint(menu.sizeHint().width() - self._more_btn.width(),
+                                  menu.sizeHint().height() + 6))
+
     def _toggle_mute(self) -> None:
         """볼륨 0 <-> 이전 값 토글."""
         current = self._state.volume
@@ -435,11 +698,11 @@ class DeckWindow(QMainWindow):
         # 좋아요는 하트라서 초록보다 앨범색이 더 자연스럽다.
         self._like_btn.set_accent(palette.bright)
 
-        # 연결 표시등도 함께 물들여 화면이 하나로 보이게 한다.
+        self._more_btn.set_accent(palette.base)
+
+        # Spotify 마크도 함께 물들여 화면이 하나로 보이게 한다.
         if self._connected:
-            self._status_dot.setStyleSheet(
-                f"color: {palette.base.name()}; font-size: 13px;"
-            )
+            self._logo.set_color(palette.base)
 
     # -- 상태 반영 -----------------------------------------------------------
 
@@ -531,15 +794,21 @@ class DeckWindow(QMainWindow):
         if self._connected == connected:
             return
         self._connected = connected
+        size = self._layout.meta_pt + 2
+
         if connected:
-            dot = self._accent.base.name() if self._accent else Colors.ACCENT
-            self._status_dot.setStyleSheet(f"color: {dot}; font-size: 13px;")
-            self._status_label.setText("Spotify 연결됨")
-            self._status_label.setStyleSheet(f"color: {Colors.TEXT_DIM}; font-size: 12px;")
+            # 정상일 때는 마크만 두고 글자를 지운다.
+            # "연결됨"은 굳이 읽을 필요가 없고, 작은 화면에서 자리만 차지한다.
+            self._logo.set_color(self._accent.base)
+            self._status_label.setText("")
+            self._status_label.hide()
         else:
-            self._status_dot.setStyleSheet(f"color: {Colors.DANGER}; font-size: 13px;")
+            self._logo.set_color(QColor(Colors.DANGER))
             self._status_label.setText("연결 끊김")
-            self._status_label.setStyleSheet(f"color: {Colors.DANGER}; font-size: 12px;")
+            self._status_label.setStyleSheet(
+                f"color: {Colors.DANGER}; font-size: {size}px;"
+            )
+            self._status_label.show()
 
     def _show_toast(self, message: str) -> None:
         """짧은 성공 피드백. 일정 시간 뒤 단축키 안내로 돌아간다."""
@@ -605,18 +874,15 @@ class DeckWindow(QMainWindow):
         위젯을 다시 만들지 않고 크기·폰트만 바꾼다.
         재생성하면 앨범 아트 캐시와 웨이브 상태가 날아간다.
         """
-        # --- 여백 ---
-        central = self.centralWidget()
-        if central is not None and central.layout() is not None:
-            central.layout().setContentsMargins(
+        host = self._device_frame or self.centralWidget()
+        if host is not None and host.layout() is not None:
+            host.layout().setContentsMargins(
                 profile.margin_h, profile.margin_v, profile.margin_h, profile.margin_v
             )
-            central.layout().setSpacing(profile.section_gap)
 
-        self._body.setSpacing(profile.column_gap)
-        self._body.setStretch(0, profile.art_stretch)
-        self._body.setStretch(1, profile.panel_stretch)
-        self._album_art.set_vertical_bias(profile.art_vertical_bias)
+        # --- 앨범 아트 ---
+        edge = profile.art_edge
+        self._album_art.setFixedSize(edge, edge)
 
         # --- 글자 ---
         title_font = self._title_label.font()
@@ -631,7 +897,7 @@ class DeckWindow(QMainWindow):
 
         for label in (self._elapsed_label, self._duration_label):
             label.setStyleSheet(
-                f"color: {Colors.TEXT_DIM}; font-size: {profile.meta_pt}px;"
+                f"color: {Colors.TEXT_DIM}; font-size: {profile.meta_pt + 1}px;"
             )
 
         # --- 컨트롤 ---
